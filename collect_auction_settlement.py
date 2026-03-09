@@ -96,9 +96,16 @@ def fetch_settlement(trd_clcln_ymd: str, whsl_mrkt_cd: str, page_no: int = 1, nu
         "cond[whsl_mrkt_cd::EQ]": whsl_mrkt_cd,
         "cond[trd_clcln_ymd::EQ]": trd_clcln_ymd,
     }
-    resp = requests.get(BASE_URL, params=params, timeout=20)
-    resp.raise_for_status()
-    return resp.json()
+    for attempt in range(5):
+        resp = requests.get(BASE_URL, params=params, timeout=20)
+        if resp.status_code == 429:
+            wait = 60 * (attempt + 1)
+            log.warning(f"  429 Too Many Requests, waiting {wait}s (attempt {attempt+1}/5)")
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp.json()
+    resp.raise_for_status()  # 5회 실패 시 에러 발생
 
 
 def iter_settlement_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):

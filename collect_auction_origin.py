@@ -39,9 +39,16 @@ def fetch_origin_trades(trd_clcln_ymd: str, whsl_mrkt_cd: str, page_no: int = 1,
         "cond[whsl_mrkt_cd::EQ]": whsl_mrkt_cd,
         "cond[trd_clcln_ymd::EQ]": trd_clcln_ymd,
     }
-    resp = requests.get(BASE_URL, params=params, timeout=20)
+    for attempt in range(5):
+        resp = requests.get(BASE_URL, params=params, timeout=20)
+        if resp.status_code == 429:
+            wait = 60 * (attempt + 1)
+            log.warning(f"  429 Too Many Requests, waiting {wait}s (attempt {attempt+1}/5)")
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp.json()
     resp.raise_for_status()
-    return resp.json()
 
 
 def iter_origin_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):

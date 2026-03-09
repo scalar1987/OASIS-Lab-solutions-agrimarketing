@@ -100,9 +100,16 @@ def fetch_sequel(spmt_ymd: str, whsl_mrkt_cd: str | None, page_no: int = 1, num_
     if whsl_mrkt_cd:
         params["cond[whsl_mrkt_cd::EQ]"] = whsl_mrkt_cd
 
-    resp = requests.get(BASE_URL, params=params, timeout=20)
+    for attempt in range(5):
+        resp = requests.get(BASE_URL, params=params, timeout=20)
+        if resp.status_code == 429:
+            wait = 60 * (attempt + 1)
+            log.warning(f"  429 Too Many Requests, waiting {wait}s (attempt {attempt+1}/5)")
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp.json()
     resp.raise_for_status()
-    return resp.json()
 
 
 def iter_sequel_items(spmt_ymd: str, whsl_mrkt_cd: str | None):
