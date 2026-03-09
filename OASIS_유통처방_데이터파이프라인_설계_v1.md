@@ -54,60 +54,171 @@
 
 ## 2. 데이터 소스별 상세 스펙
 
-### 2-1. aT KAMIS API — 가격·반입량 (핵심)
+### 2-1. aT KAMIS / 공공데이터포털 OpenAPI — 가격·반입량 (핵심)
 
-**역할**: 유통 처방의 1차 입력. 일별 도매·소매 경매가격 + 반입량
+**역할**: 수집 빈도 1일 1회. 도매 가격데이터 + 경매 거래 정보(원표/정산 포함)를 수집.
+
+#### 2-1-1. 일별 가격조사 정보 (perDay)
 
 **엔드포인트**:
 ```
-GET https://www.kamis.or.kr/service/price/xml.do
-    ?action=dailySalesList
-    &p_product_cls_code=01      # 01=채소, 02=과일, 03=수산, 04=축산, 05=곡물
-    &p_item_code={작목코드}      # 예: 배추=111, 고추=243, 양파=221, 마늘=231
-    &p_kind_code=01             # 01=상품, 02=중품
-    &p_country_code={시장코드}   # 1101=서울가락, 2100=부산엄궁, 2200=대구북부
-    &p_regday={YYYY-MM-DD}
-    &p_convert_kg_yn=Y          # kg 단위 환산
+GET https://apis.data.go.kr/B552845/perDay/price
 ```
 
-**주요 작목 코드 (밭농업 기계화 8개 + 5대 과수)**:
-```python
-CROP_CODES = {
-    # 채소류 (p_product_cls_code=01)
-    '배추': '111', '무': '112', '양파': '221', '마늘': '231',
-    '대파': '261', '고추': '243', '감자': '152', '콩': '111',  # 콩 별도 확인 필요
-    # 과수류 (p_product_cls_code=02)
-    '사과': '411', '배': '412', '복숭아': '415',
-    '포도': '414', '감귤': '417',
-}
-
-MARKET_CODES = {
-    '가락': '1101', '강서': '1104', '구리': '1302',
-    '부산엄궁': '2100', '대구북부': '2200', '광주각화': '3100',
-}
+**필수 파라미터**:
+```
+serviceKey
+returnType (JSON/XML)
+pageNo
+numOfRows
+cond[exmn_ymd::GTE]  # YYYYMMDD
+cond[exmn_ymd::LTE]  # YYYYMMDD
+cond[ctgry_cd::EQ]   # 품목류코드
+cond[item_cd::EQ]    # 품목코드
 ```
 
-**수집 스케줄**: 매일 오전 06:00 (전일 데이터 확정 후)
-
-**InfluxDB 스키마**:
+**선택 파라미터**:
 ```
-measurement: kamis_price
-tags:
-  - crop_code (작목코드)
-  - crop_name (작목명)
-  - market_code (시장코드)
-  - grade (등급: 상/중)
-fields:
-  - price_per_kg (float) — 도매경매가 원/kg
-  - volume_kg (float) — 반입량 kg
-  - retail_price (float) — 소매가 (별도 endpoint)
-timestamp: 해당 날짜 00:00:00 UTC+9
+cond[se_cd::EQ]      # 판매단계(도매/소매)
+cond[grd_cd::EQ]     # 등급코드
+cond[mrkt_cd::EQ]    # 시장코드(7자리)
 ```
 
-**과거 데이터 초기 수집**: 파이프라인 구축 즉시 5년치(2020~) 일괄 수집 → 계절성 베이스라인 구축
+**주요 응답 필드**:
+- `exmn_ymd`, `mrkt_cd`, `item_cd`, `unit`, `unit_sz`
+- `exmn_dd_prc` (조사일가격)
+- `exmn_dd_cnvs_prc` (kg 환산 가격)
 
 ---
 
+#### 2-1-2. 전국 공영도매시장 경매원표정보
+
+**엔드포인트**:
+```
+GET https://apis.data.go.kr/B552845/katOrigin/trades
+```
+
+**필수 파라미터**:
+```
+serviceKey
+cond[whsl_mrkt_cd::EQ]    # 도매시장코드
+cond[trd_clcln_ymd::EQ]   # 거래결제일자 (YYYY-MM-DD)
+```
+
+**선택 파라미터**:
+```
+cond[corp_cd::EQ]         # 법인코드
+cond[gds_lclsf_cd::EQ]    # 상품대분류코드
+cond[gds_mclsf_cd::EQ]    # 상품중분류코드
+cond[gds_sclsf_cd::EQ]    # 상품소분류코드
+selectable                # 조회 컬럼 선택
+```
+
+**주요 응답 필드(원표 기준)**:
+- `qty` (수량), `unit_qty`, `unit_tot_qty`
+- `scsbd_prc` (낙찰가), `totprc` (합계금액)
+- 등급/규격/산지/포장/법인코드/원산지/출하주 등 포함
+
+---
+
+#### 2-1-3. 전국 공영도매시장 정산정보
+
+**엔드포인트**:
+```
+GET https://apis.data.go.kr/B552845/katSale/trades
+```
+
+**필수 파라미터**:
+```
+serviceKey
+cond[whsl_mrkt_cd::EQ]
+cond[trd_clcln_ymd::EQ]   # YYYY-MM-DD
+```
+
+**선택 파라미터**:
+```
+cond[corp_cd::EQ]
+cond[gds_lclsf_cd::EQ]
+cond[gds_mclsf_cd::EQ]
+cond[gds_sclsf_cd::EQ]
+selectable
+```
+
+**주요 응답 필드(정산 기준)**:
+- `avgprc` (평균가), `lwprc` (최저가), `hgprc` (최고가)
+- `unit_tot_qty` (총거래수량), `totprc` (총거래금액)
+- 등급/규격/산지/포장/법인코드/원산지/출하주 등 포함
+
+---
+
+#### 2-1-4. 출하량 추이 정보
+
+**엔드포인트**:
+```
+GET https://apis.data.go.kr/B552845/shipmentSequel/info
+```
+
+**필수 파라미터**:
+```
+serviceKey
+returnType
+pageNo
+numOfRows
+cond[spmt_ymd::EQ]        # 출하일자 (YYYYMMDD)
+```
+
+**선택 파라미터**:
+```
+cond[whsl_mrkt_cd::EQ]
+cond[corp_cd::EQ]
+cond[gds_lclsf_cd::EQ]
+cond[gds_mclsf_cd::EQ]
+cond[gds_sclsf_cd::EQ]
+selectable
+```
+
+**주요 응답 필드(출하 기준)**:
+- `avg_spmt_qty`, `avg_spmt_amt`
+- `ww1_bfr_avg_spmt_qty/amt` ~ `ww4_bfr_avg_spmt_qty/amt`
+
+---
+
+#### 2-1-5. 수집/적재 계획 (파이프라인 통합)
+
+**수집 주기**:
+- **가격(perDay)**: 일 1회, 전일 데이터 D+1 수신
+- **경매원표/정산**: 일 1회, `trd_clcln_ymd=전일` 기준
+- **출하량 추이**: 일 1회, `spmt_ymd=전일` 기준
+
+**저장/활용**:
+- 가격(perDay) = InfluxDB 시계열 적재
+- 원표 = PostgreSQL 경매원표 테이블(관계형)
+- 정산·출하량은 **InfluxDB에도 적재**, 원표만큼 정형화 어려움
+
+**InfluxDB 스키마(가격·거래량)**:
+```
+measurement: kamis_price
+tags: crop_name, market_code, market_name, grade, se
+fields:
+  - price_per_kg
+  - price_raw
+  - unit
+  - unit_sz
+
+measurement: kamis_volume
+tags: crop_name, market_code, market_name, source  # source=auction_origin|settlement|shipment_sequel
+fields:
+  - volume_qty
+  - volume_amt
+  - avg_price
+```
+
+**주요 테이블(PostgreSQL 저장)**:
+- `auction_origin_trades` (경매원표 원시)
+- `auction_settlement_daily` (정산 일집계)
+- `shipment_sequel_daily` (출하량 추이)
+
+---
 ### 2-2. 관세청 수출입무역통계 API — 수입 농산물
 
 **역할**: 국산 도매가에 간접 영향을 주는 수입 압력 지표
@@ -531,21 +642,25 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 scheduler = AsyncIOScheduler()
 
-# 고빈도 수집
-scheduler.add_job(collect_kamis_price,      'cron', hour=6, minute=0)   # 매일 06:00
-scheduler.add_job(collect_weather_data,     'cron', minute=0)           # 매시간
-scheduler.add_job(collect_sentinel_ndvi,    'cron', day_of_week='mon,thu') # 격주
+# 일별 수집 (KST)
+scheduler.add_job(collect_kamis_price,        'cron', hour=6, minute=0)   # perDay 가격
+scheduler.add_job(collect_auction_origin,     'cron', hour=6, minute=30)  # 경매원표
+scheduler.add_job(collect_auction_settlement, 'cron', hour=6, minute=45)  # 정산정보
+scheduler.add_job(collect_shipment_sequel,    'cron', hour=7, minute=0)   # 출하량 추이
+scheduler.add_job(collect_weather_data,       'cron', minute=0)           # 기상청
+scheduler.add_job(collect_sentinel_ndvi,      'cron', day_of_week='mon,thu') # 위성
 
 # 저빈도 수집
-scheduler.add_job(collect_import_trade,     'cron', day=1,  hour=9)     # 매월 1일
-scheduler.add_job(collect_kosis_crop_area,  'cron', month=2, day=15)    # 연 1회 2월
-scheduler.add_job(crawl_krei_outlook,       'cron', day=15, hour=10)    # 매월 15일
+scheduler.add_job(collect_import_trade,       'cron', day=1,  hour=9)     # 매월 1일
+scheduler.add_job(collect_kosis_crop_area,    'cron', month=2, day=15)    # 연 1회 2월
+scheduler.add_job(crawl_krei_outlook,         'cron', day=15, hour=10)    # 매월 15일
 
-# 처방 생성
-scheduler.add_job(run_distribution_prescriptions,  'cron', hour=7)     # 매일 07:00
-scheduler.add_job(rebuild_seasonal_baselines,       'cron', day=1)      # 매월 baseline 재계산
+# 처방 실행
+scheduler.add_job(run_distribution_prescriptions,  'cron', hour=7, minute=30) # 매일 07:30
+scheduler.add_job(rebuild_seasonal_baselines,      'cron', day=1)             # 매월 baseline 재구축
 
 scheduler.start()
+
 ```
 
 ---
@@ -602,4 +717,255 @@ PostgreSQL 15         # 마스터 DB (AWS RDS 또는 자체)
 
 ---
 
-> **다음 업데이트 예정**: Phase 1 현장 데이터 축적 후 GDD 임계값 보정 결과 반영, KREI 크롤러 실제 구현 코드 추가
+---
+
+## 8. 경쟁 서비스 분석 및 차별화 전략
+
+### 8-1. 기존 서비스 현황
+
+| 서비스 | 제공 기관 | 주요 기능 | 한계 |
+|--------|----------|----------|------|
+| **KAMIS** | aT | 품목·등급·시장별 일별 도소매가 조회, 가격등락 정보 | 조회형 서비스. 처방 없음. 농민이 직접 해석해야 함 |
+| **농넷(nongnet)** | aT | 경매 원표, 정산정보, 출하정보 조회 | 이미 유통된 데이터 조회. 미래 시점 의사결정 지원 없음 |
+| **농업관측포털** | KREI | 월별 품목 전망 보고서 (텍스트) | 월 1회 발행. 품목 수 제한. 개인 농가에 맞춰진 서비스 아님 |
+| **AI 가격예측 경진대회 모형** | aT 주관 | LSTM·XGBoost·ARIMA 등 10종 앙상블, 최대 4주 예측 | 모형이 공개되어 있으나 API·앱 미제공. "처방" 없는 예측만 존재 |
+
+### 8-2. 핵심 GAP: 진단 vs 처방
+
+```
+기존 서비스:  "오늘 배추 가락시장 도매가 12,400원/10kg입니다"
+                          ↓ (농민이 스스로 해석)
+              "비싸네? 싸네? 지금 팔아야 하나? 기다려야 하나?"
+
+OASIS Lab:    "지금 출하하세요 — 현재 가격 평년 동기 대비 상위 20%,
+               반입량은 감소 추세입니다. 이번 주가 고점 가능성 높습니다."
+```
+
+**3가지 차별화 축**:
+
+1. **처방전(Rx) 모델**: 데이터 제공이 아닌 행동 지시. "지금 팔아라 / 1주 기다려라 / 저장하라"
+2. **Push vs Pull**: 농민이 앱을 열지 않아도 처방 시점에 알림 발송 (push). 기존 서비스는 농민이 찾아가야 함 (pull)
+3. **개인화**: 내 작목 × 내 지역 × 내 수확 가능 시점 기준 처방. 전국 평균이 아닌 내 상황 기준
+
+### 8-3. aT AI 가격예측 우수모형과의 관계
+
+- 경진대회 1~10위 모형: 예측 정확도 우수 (MAPE 기준 5~12% 수준)
+- 문제: 예측 숫자가 나와도 "그래서 팔아야 하나?"를 알 수 없음
+- OASIS Lab 전략: AI 예측 모형을 가격전망 신호 중 하나로 흡수 (앙상블 출력 → 방향성 신호 변환)
+- 차별점: 가격 예측 → 처방 연결 파이프라인이 핵심. 예측 모형 자체의 경쟁이 아님
+
+---
+
+## 9. 농가 개인화 등록 모델
+
+### 9-1. 등록 정보 스펙
+
+```python
+class FarmProfile(BaseModel):
+    farm_id: str                     # UUID
+    owner_name: str
+
+    # 위치
+    sido: str                        # 시·도 (예: "경기")
+    sigungu: str                     # 시·군·구 (예: "이천시")
+    eupmyeondong: str | None         # 읍·면·동 (선택)
+    latitude: float | None           # 위경도 (기상 데이터 연결용)
+    longitude: float | None
+
+    # 재배 정보
+    crops: list[CropConfig]          # 복수 작목 등록 가능
+
+    # 알림 설정
+    notification_channel: str        # "kakao" | "sms" | "push"
+    notification_hour: int           # 알림 수신 시간대 (기본: 7)
+
+
+class CropConfig(BaseModel):
+    crop_name: str                   # 예: "배추"
+    variety: str | None              # 품종 (예: "가을배추", "봄고추")
+    cultivation_area_m2: int | None  # 재배 면적 (㎡)
+
+    # 출하처 설정
+    shipment_channels: list[str]     # ["신지공판장", "가락도매시장", "농협APC"]
+    primary_channel: str             # 주 출하처
+
+    # 출하 가능 시점
+    planting_date: date | None       # 파종일 (GDD 계산용)
+    expected_harvest_start: date     # 수확 시작 예정일
+    expected_harvest_end: date       # 수확 종료 예정일 (수확 가능 기간)
+    storage_available: bool          # 저온 저장 시설 보유 여부
+    storage_capacity_ton: float | None  # 저장 가능 물량 (톤)
+```
+
+### 9-2. 지역-시장 매핑
+
+```python
+# 농가 시/군/구 → 인접 공영도매시장 우선순위 자동 매핑
+REGION_MARKET_MAP = {
+    "서울": ["서울가락", "서울강서"],
+    "경기": ["서울가락", "서울강서", "수원", "구리"],
+    "강원": ["춘천", "강릉", "원주"],
+    "충북": ["청주", "충주"],
+    "충남": ["천안"],
+    "전북": ["전주", "익산", "정읍"],
+    "전남": ["순천"],
+    "경북": ["포항", "안동", "구미"],
+    "경남": ["창원내서", "창원팔용", "진주"],
+    "부산": ["부산엄궁", "부산반여"],
+    "대구": ["대구북부"],
+    "광주": ["광주각화", "광주서부"],
+    "대전": ["대전오정", "대전노은"],
+    "울산": ["울산"],
+    "인천": ["인천남촌", "인천삼산"],
+}
+
+def get_relevant_markets(sigungu: str, crop_name: str) -> list[str]:
+    """농가 소재지 기준 처방에 사용할 시장 목록 반환"""
+    sido = resolve_sido(sigungu)
+    return REGION_MARKET_MAP.get(sido, ["서울가락"])  # fallback: 가락
+```
+
+### 9-3. 출하처별 처방 분기
+
+```
+출하 채널 = "신지공판장(지역 공판장)"
+  → 지역 도매시장 가격 기준 처방
+  → 공판장 경매 가격 ≈ 인접 도매시장 중간 가격으로 추정
+
+출하 채널 = "가락도매시장 직출하"
+  → 가락시장 가격 기준 처방 (전국 최대 물량, 가격 기준 역할)
+
+출하 채널 = "농협 APC / 계약재배"
+  → 처방 대상에서 제외 (가격 이미 확정) 또는 별도 모듈
+```
+
+---
+
+## 10. 처방 UI/UX 설계
+
+### 10-1. 처방 카드 포맷
+
+```
+┌─────────────────────────────────────────────┐
+│  🌿 배추 (이천시 → 가락시장)          2026-03-09 │
+├─────────────────────────────────────────────┤
+│                                             │
+│  현재 도매가   12,400원/10kg                │
+│  가격전망      ↘ 약세 예상 (7일 이내)       │
+│                                             │
+│  ┌─────────────────────────────────────┐    │
+│  │  처방: 이번 주 내 출하 권장         │    │
+│  └─────────────────────────────────────┘    │
+│                                             │
+│  근거:                                      │
+│  • 현재 가격 평년 동기 상위 22% 구간        │
+│  • 반입량 전주 대비 +18% 증가 (하락 선행)   │
+│  • 계절성: 3월 말부터 가격 하락 구간 진입   │
+│                                             │
+│  [자세히 보기]  [다음 알림 설정]            │
+└─────────────────────────────────────────────┘
+```
+
+### 10-2. 가격전망 방향 신호 결정 기준
+
+| 신호 | 조건 | 방향 |
+|------|------|------|
+| **가격 분위** | 현재 가격 ≥ 평년 동기 q75 | ↗ 고점 (매도 유리) |
+| | q25 ≤ 현재 가격 < q75 | → 보합 |
+| | 현재 가격 < 평년 동기 q25 | ↘ 저점 |
+| **반입량 모멘텀** | 7일 이동평균 대비 +15% 초과 | 하락 압력 (↘ 가중) |
+| | 7일 이동평균 대비 -10% 이하 | 상승 가능 (↗ 가중) |
+| | 그 외 | 중립 |
+| **계절성** | STL seasonal component 하락 구간 | ↘ 가중 |
+| | STL seasonal component 상승 구간 | ↗ 가중 |
+
+**3신호 조합 최종 방향 결정**:
+
+```python
+def determine_price_direction(price_pos: str, momentum: float,
+                               seasonal: str) -> str:
+    """
+    Returns: '↗ 강세' | '↗ 약상승' | '→ 보합' | '↘ 약세' | '↘ 하락경고'
+    """
+    score = 0  # 양수 = 상승, 음수 = 하락
+
+    if price_pos == 'HIGH':   score += 2   # 고점 → 하락 압력
+    elif price_pos == 'LOW':  score -= 2   # 저점 → 반등 가능
+
+    if momentum > 0.15:       score += 2   # 반입량 급증 → 가격 하락
+    elif momentum < -0.10:    score -= 1   # 반입량 감소 → 가격 지지
+
+    if seasonal == 'DOWN':    score += 1   # 계절적 하락 구간
+    elif seasonal == 'UP':    score -= 1   # 계절적 상승 구간
+
+    if score >= 3:    return '↘ 하락경고'
+    elif score == 2:  return '↘ 약세'
+    elif score <= -2: return '↗ 강세'
+    elif score == -1: return '↗ 약상승'
+    else:             return '→ 보합'
+```
+
+### 10-3. 처방 메시지 템플릿
+
+```python
+PRESCRIPTION_MESSAGES = {
+    'SHIP_NOW': {
+        'title': '이번 주 출하 권장',
+        'body': '현재 가격이 평년 동기 대비 고점 구간입니다. '
+                '반입량 증가 전에 출하하시면 유리합니다.',
+        'urgency': 'HIGH',
+    },
+    'SHIP_NOW_URGENT': {
+        'title': '즉시 출하 권장 (저장 불가)',
+        'body': '현재 가격이 낮으나 {crop}은 장기 저장이 어렵습니다. '
+                '품질 손실 전 출하를 권장합니다.',
+        'urgency': 'HIGH',
+    },
+    'WAIT': {
+        'title': '1~2주 대기 후 출하 검토',
+        'body': '현재 가격이 저점 구간입니다. '
+                '저온 저장 후 가격 회복을 기다리는 것이 유리합니다.',
+        'urgency': 'LOW',
+    },
+    'SHIP_WITHIN_WEEK': {
+        'title': '이번 주 내 출하 검토',
+        'body': '반입량 증가로 3~5일 내 가격 하락이 예상됩니다. '
+                '이번 주 내 출하를 권장합니다.',
+        'urgency': 'MEDIUM',
+    },
+    'WAIT_7_10': {
+        'title': '7~10일 후 출하 검토',
+        'body': '반입량 감소세로 7~10일 후 가격 개선 가능성이 있습니다.',
+        'urgency': 'LOW',
+    },
+    'MONITOR': {
+        'title': '3일 후 재판단',
+        'body': '현재 가격과 물량이 보합 구간입니다. '
+                '3일 후 다시 처방을 확인하세요.',
+        'urgency': 'INFO',
+    },
+}
+```
+
+### 10-4. 알림 발송 조건
+
+```python
+# Push 알림은 무분별한 발송 방지를 위해 조건 설정
+NOTIFY_CONDITIONS = {
+    # 처방 변경 시 즉시 알림
+    'prescription_changed': True,
+
+    # 고긴급 처방은 즉시 발송
+    'urgency_high_immediate': True,
+
+    # 일반 처방은 사용자 설정 시간대에 발송 (기본 07:00)
+    'scheduled_hour': True,
+
+    # 동일 처방 반복 시 최대 1회/3일
+    'repeat_suppress_days': 3,
+}
+```
+
+---
+
+> **다음 업데이트 예정**: Phase 1 현장 데이터 축적 후 GDD 임계값 보정 결과 반영, KREI 크롤러 실제 구현 코드 추가, 처방 정확도 백테스트 결과 (과거 5년 데이터 기준)

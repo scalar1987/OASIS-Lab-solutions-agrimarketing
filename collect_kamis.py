@@ -1,20 +1,20 @@
-"""
+﻿"""
 collector/collect_kamis.py
-aT KAMIS API → InfluxDB Cloud 적재
+KAMIS per-day price API -> InfluxDB Cloud
 
-실행:
-  python collect_kamis.py                    # 오늘 날짜
-  python collect_kamis.py --date 2026-03-09  # 특정 날짜
-  python collect_kamis.py --backfill 365     # 과거 N일 소급 수집
+Run:
+  python collect_kamis.py                    # today (local date)
+  python collect_kamis.py --date 2026-03-09  # single date (YYYY-MM-DD)
+  python collect_kamis.py --backfill 365     # backfill N days
 """
 
 import os
-import sys
 import time
 import argparse
 import logging
+from datetime import date, datetime, timedelta
+
 import requests
-from datetime import date, timedelta
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
@@ -23,152 +23,529 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-# ── 설정 ──────────────────────────────────────────────────────
+KAMIS_BASE = "https://apis.data.go.kr/B552845/perDay/price"
+KAT_SALE_BASE = "https://apis.data.go.kr/B552845/katSale/trades"
+SHIPMENT_BASE = "https://apis.data.go.kr/B552845/shipmentSequel/info"
+KAMIS_API_KEY = os.environ["KAMIS_API_KEY"]
 
-KAMIS_BASE = "https://www.kamis.or.kr/service/price/xml.do"
-KAMIS_API_KEY  = os.environ["KAMIS_API_KEY"]
-KAMIS_CERT_KEY = os.environ.get("KAMIS_CERT_KEY", KAMIS_API_KEY)
-
-INFLUX_URL    = os.environ["INFLUXDB_URL"]
-INFLUX_TOKEN  = os.environ["INFLUXDB_TOKEN"]
-INFLUX_ORG    = os.environ["INFLUXDB_ORG"]
+INFLUX_URL = os.environ["INFLUXDB_URL"]
+INFLUX_TOKEN = os.environ["INFLUXDB_TOKEN"]
+INFLUX_ORG = os.environ["INFLUXDB_ORG"]
 INFLUX_BUCKET = os.environ["INFLUXDB_BUCKET"]
 
-# 수집 대상 작목: (작목명, KAMIS 품목코드, 부류코드)
-# 부류코드: 01=채소, 02=과일, 05=곡물
-CROPS = [
-    ("배추", "111", "01"),
-    ("고추", "243", "01"),
-    ("양파", "221", "01"),
-    ("마늘", "231", "01"),
-    ("대파", "261", "01"),
-    ("감자", "152", "01"),
-    ("사과", "411", "02"),
-    ("배",   "412", "02"),
-    ("포도", "414", "02"),
+# Default filters
+SE_CODE = "02"   # 01: retail, 02: wholesale
+GRADE_CODE = "04"  # 04: top grade
+
+# (crop_name, ctgry_cd, item_cd, vrty_cd)
+DEFAULT_CROPS = [
+    ("배추", "200", "211", None),
+    ("고추", "200", "243", None),
+    ("양파", "200", "245", None),
+    ("마늘", "200", "244", None),
+    ("대파", "200", "246", None),
+    ("감자", "100", "152", None),
+    ("사과", "400", "411", None),
+    ("배",   "400", "412", None),
+    ("포도", "400", "414", None),
 ]
 
-# 수집 대상 도매시장: (시장명, KAMIS 시장코드)
+# 전국 공영도매시장 32개
+# (시장명, perDay API 시장코드, katSale whsl_mrkt_cd)
 MARKETS = [
-    ("가락",   "1101"),
-    ("강서",   "1104"),
-    ("구리",   "1302"),
-    ("부산엄궁", "2100"),
-    ("대구북부", "2200"),
+    # 서울
+    ("서울가락",   "0110211", None),
+    ("서울강서",   None, "1101"),
+    # 부산
+    ("부산엄궁",   "0210042", None),
+    ("부산반여",   None, "2100"),
+    # 대구
+    ("대구북부",   "0220021", None),
+    # 인천
+    ("인천남촌",   None, "2300"),
+    ("인천삼산",   None, "2300"),
+    # 광주
+    ("광주각화",   "0240122", None),
+    ("광주서부",   "0240123", None),
+    # 대전
+    ("대전오정",   "0250113", None),
+    ("대전노은",   None, "2500"),
+    # 울산
+    ("울산",       None, "2600"),
+    # 경기
+    ("수원",       None, "3100"),
+    ("안양",       None, "3100"),
+    ("안산",       None, "3100"),
+    ("구리",       None, "3100"),
+    # 강원
+    ("춘천",       None, "3200"),
+    ("강릉",       None, "3200"),
+    ("원주",       None, "3200"),
+    # 충청
+    ("청주",       None, "3300"),
+    ("충주",       None, "3300"),
+    ("천안",       None, "3400"),
+    # 전라
+    ("전주",       None, "3500"),
+    ("익산",       None, "3500"),
+    ("정읍",       None, "3500"),
+    ("순천",       None, "3600"),
+    # 경상
+    ("포항",       None, "3700"),
+    ("안동",       None, "3700"),
+    ("구미",       None, "3700"),
+    ("창원내서",   None, "3800"),
+    ("창원팔용",   None, "3800"),
+    ("진주",       None, "3800"),
 ]
 
-GRADE_CODE = "01"  # 01=상품
+
+def _format_yyyymmdd(d: date | str) -> str:
+    if isinstance(d, date):
+        return d.strftime("%Y%m%d")
+    if "-" in d:
+        return datetime.strptime(d, "%Y-%m-%d").strftime("%Y%m%d")
+    if len(d) == 8 and d.isdigit():
+        return d
+    raise ValueError(f"Invalid date format: {d}")
 
 
-# ── KAMIS API 호출 ─────────────────────────────────────────────
+def _format_iso_date(yyyymmdd: str) -> str:
+    return datetime.strptime(yyyymmdd, "%Y%m%d").strftime("%Y-%m-%d")
 
-def fetch_daily_price(item_code: str, product_cls_code: str,
-                      country_code: str, target_date: str) -> dict | None:
-    """
-    KAMIS 일별 소매가격 조회 (도매 + 소매 통합 엔드포인트)
-    Returns: { price_per_kg, volume_kg } or None
-    """
+
+def _parse_price(value: str | None) -> float | None:
+    if not value:
+        return None
+    cleaned = value.replace(",", "").replace("-", "0")
+    try:
+        num = float(cleaned)
+    except ValueError:
+        return None
+    return num if num > 0 else None
+
+
+def _parse_num(value: str | None) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = str(value).replace(",", "").replace("-", "0")
+    try:
+        num = float(cleaned)
+    except ValueError:
+        return None
+    return num if num > 0 else None
+
+
+def _normalize_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return "".join(ch for ch in value if ch.isalnum()).lower()
+
+
+def _match_market_name(item_market: str | None, target_market: str) -> bool:
+    item_norm = _normalize_text(item_market)
+    target_norm = _normalize_text(target_market)
+    if not item_norm or not target_norm:
+        return False
+    return target_norm in item_norm or item_norm in target_norm
+
+
+def _match_crop_name(item_crop: str | None, target_crop: str) -> bool:
+    item_norm = _normalize_text(item_crop)
+    target_norm = _normalize_text(target_crop)
+    if not item_norm or not target_norm:
+        return False
+    return target_norm in item_norm or item_norm in target_norm
+
+
+def fetch_kat_sale_items(trd_clcln_ymd: str, whsl_mrkt_cd: str) -> list[dict]:
+    page_no = 1
+    items_all = []
+    selectable = ",".join([
+        "whsl_mrkt_cd",
+        "whsl_mrkt_nm",
+        "trd_clcln_ymd",
+        "gds_lclsf_nm",
+        "gds_mclsf_nm",
+        "gds_sclsf_nm",
+        "avgprc",
+        "unit_qty",
+        "unit_cd",
+        "unit_tot_qty",
+    ])
+    while True:
+        params = {
+            "serviceKey": KAMIS_API_KEY,
+            "returnType": "json",
+            "pageNo": str(page_no),
+            "numOfRows": "1000",
+            "cond[whsl_mrkt_cd::EQ]": whsl_mrkt_cd,
+            "cond[trd_clcln_ymd::EQ]": trd_clcln_ymd,
+            "selectable": selectable,
+        }
+        try:
+            resp = requests.get(KAT_SALE_BASE, params=params, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            log.warning(f"katSale fetch failed [{whsl_mrkt_cd}/{trd_clcln_ymd}]: {e}")
+            break
+
+        header = data.get("response", {}).get("header", {})
+        result_code = header.get("resultCode")
+        if result_code not in ("00", "0", None):
+            log.warning(f"katSale error {result_code}: {header.get('resultMsg')}")
+            break
+
+        body = data.get("response", {}).get("body", {})
+        items = body.get("items", {}).get("item", [])
+        if isinstance(items, dict):
+            items = [items]
+        if not items:
+            break
+        items_all.extend(items)
+
+        total = body.get("totalCount", 0)
+        num_rows = int(body.get("numOfRows", len(items)))
+        if page_no * num_rows >= int(total):
+            break
+        page_no += 1
+        time.sleep(0.1)
+
+    return items_all
+
+
+def extract_kat_sale_price(items: list[dict], market_name: str, crop_name: str) -> dict | None:
+    weight_sum = 0.0
+    weighted_price_sum = 0.0
+    price_sum = 0.0
+    price_count = 0
+    volume_kg = 0.0
+
+    for item in items:
+        if not _match_market_name(item.get("whsl_mrkt_nm"), market_name):
+            continue
+        crop_nm = (
+            item.get("gds_sclsf_nm")
+            or item.get("gds_mclsf_nm")
+            or item.get("gds_lclsf_nm")
+        )
+        if not _match_crop_name(crop_nm, crop_name):
+            continue
+        avgprc = _parse_num(item.get("avgprc"))
+        unit_qty = _parse_num(item.get("unit_qty"))
+        unit_tot_qty = _parse_num(item.get("unit_tot_qty"))
+        if not avgprc or not unit_qty or unit_qty <= 0:
+            continue
+        price_per_kg = avgprc / unit_qty
+        if unit_tot_qty and unit_tot_qty > 0:
+            vol = unit_tot_qty * unit_qty
+            weighted_price_sum += price_per_kg * vol
+            weight_sum += vol
+            volume_kg += vol
+        else:
+            price_sum += price_per_kg
+            price_count += 1
+
+    if weight_sum > 0:
+        price = weighted_price_sum / weight_sum
+    elif price_count > 0:
+        price = price_sum / price_count
+    else:
+        return None
+
+    return {"price_per_kg": price, "volume_kg": volume_kg}
+
+
+def fetch_daily_price(ctgry_cd: str, item_cd: str, vrty_cd: str | None, mrkt_cd: str, exmn_ymd: str) -> dict | None:
     params = {
-        "action":              "dailySalesList",
-        "p_cert_key":          KAMIS_CERT_KEY,
-        "p_cert_id":           KAMIS_API_KEY,
-        "p_returntype":        "json",
-        "p_product_cls_code":  product_cls_code,
-        "p_item_code":         item_code,
-        "p_kind_code":         GRADE_CODE,
-        "p_country_code":      country_code,
-        "p_regday":            target_date,
-        "p_convert_kg_yn":     "Y",
+        "serviceKey": KAMIS_API_KEY,
+        "returnType": "json",
+        "pageNo": "1",
+        "numOfRows": "1000",
+        "cond[exmn_ymd::GTE]": exmn_ymd,
+        "cond[exmn_ymd::LTE]": exmn_ymd,
+        "cond[ctgry_cd::EQ]": ctgry_cd,
+        "cond[item_cd::EQ]": item_cd,
+        "cond[se_cd::EQ]": SE_CODE,
+        "cond[grd_cd::EQ]": GRADE_CODE,
+        "cond[mrkt_cd::EQ]": mrkt_cd,
     }
+    if vrty_cd:
+        params["cond[vrty_cd::EQ]"] = vrty_cd
+
     try:
         resp = requests.get(KAMIS_BASE, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
 
-        # KAMIS 응답 파싱 — 구조가 버전마다 달라 방어적으로 처리
-        items = (data.get("data", {})
-                     .get("item", []))
+        header = data.get("response", {}).get("header", {})
+        result_code = header.get("resultCode")
+        if result_code not in ("00", "0", None):
+            log.warning(f"KAMIS error {result_code}: {header.get('resultMsg')}")
+            return None
+
+        body = data.get("response", {}).get("body", {})
+        items = body.get("items", {}).get("item", [])
+        if isinstance(items, dict):
+            items = [items]
         if not items:
             return None
 
-        item = items[0]
-        price_str  = item.get("dpr1", "0").replace(",", "").replace("-", "0")
-        volume_str = item.get("qty", "0").replace(",", "").replace("-", "0")
+        # pick first item with a valid price
+        picked = None
+        for item in items:
+            price = _parse_price(item.get("exmn_dd_cnvs_prc")) or _parse_price(item.get("exmn_dd_prc"))
+            if price is not None:
+                picked = (item, price)
+                break
 
-        price  = float(price_str)  if price_str  else 0.0
-        volume = float(volume_str) if volume_str else 0.0
-
-        if price <= 0:
+        if not picked:
             return None
 
-        return {"price_per_kg": price, "volume_kg": volume}
+        item, price = picked
+        return {
+            "price_per_kg": price,
+            "item_nm": item.get("item_nm"),
+            "mrkt_nm": item.get("mrkt_nm"),
+            "unit": item.get("unit"),
+            "unit_sz": item.get("unit_sz"),
+            "exmn_ymd": item.get("exmn_ymd", exmn_ymd),
+        }
 
     except Exception as e:
-        log.warning(f"KAMIS fetch failed [{item_code}/{country_code}/{target_date}]: {e}")
+        log.warning(f"KAMIS fetch failed [{item_cd}/{mrkt_cd}/{exmn_ymd}]: {e}")
         return None
 
 
-# ── InfluxDB 적재 ──────────────────────────────────────────────
+def _read_codes_text() -> str:
+    for enc in ("utf-8", "cp949", "euc-kr"):
+        try:
+            with open("codes.txt", "r", encoding=enc, errors="strict") as f:
+                return f.read()
+        except Exception:
+            continue
+    with open("codes.txt", "r", encoding="utf-8", errors="ignore") as f:
+        return f.read()
+
+
+def load_variety_codes() -> list[dict]:
+    text = _read_codes_text()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+    item_names: dict[tuple[str, str], str] = {}
+    varieties: list[dict] = []
+
+    mode = None
+    for ln in lines:
+        if ln.startswith("==="):
+            if "품목코드" in ln:
+                mode = "item"
+            elif "품종코드" in ln:
+                mode = "vrty"
+            else:
+                mode = None
+            continue
+        if "|" not in ln or ln.startswith("부류코드") or ln.startswith("부류코드"):
+            continue
+        parts = [p.strip() for p in ln.split("|")]
+        if mode == "item" and len(parts) >= 3:
+            ctgry_cd, item_cd, item_nm = parts[0], parts[1], parts[2]
+            if ctgry_cd.isdigit() and item_cd.isdigit() and item_nm:
+                item_names[(ctgry_cd, item_cd)] = item_nm
+        elif mode == "vrty" and len(parts) >= 4:
+            ctgry_cd, item_cd, vrty_cd, vrty_nm = parts[0], parts[1], parts[2], parts[3]
+            if ctgry_cd.isdigit() and item_cd.isdigit() and vrty_cd.isdigit() and vrty_nm:
+                item_nm = item_names.get((ctgry_cd, item_cd), "")
+                varieties.append({
+                    "ctgry_cd": ctgry_cd,
+                    "item_cd": item_cd,
+                    "vrty_cd": vrty_cd,
+                    "item_nm": item_nm,
+                    "vrty_nm": vrty_nm,
+                })
+    return varieties
+
+
+def fetch_shipment_items(spmt_ymd: str, page_no: int = 1) -> dict | None:
+    params = {
+        "serviceKey": KAMIS_API_KEY,
+        "returnType": "json",
+        "pageNo": str(page_no),
+        "numOfRows": "1000",
+        "cond[spmt_ymd::EQ]": spmt_ymd,
+        "selectable": ",".join([
+            "gds_lclsf_nm",
+            "gds_mclsf_nm",
+            "gds_sclsf_nm",
+            "avg_spmt_qty",
+        ]),
+    }
+    try:
+        resp = requests.get(SHIPMENT_BASE, params=params, timeout=20)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        log.warning(f"shipment fetch failed [{spmt_ymd}]: {e}")
+        return None
+
+
+def iter_shipment_items(spmt_ymd: str):
+    page_no = 1
+    while True:
+        data = fetch_shipment_items(spmt_ymd, page_no=page_no)
+        if not data:
+            break
+        body = data.get("response", {}).get("body", {})
+        items = body.get("items", {}).get("item", [])
+        if isinstance(items, dict):
+            items = [items]
+        if not items:
+            break
+        for item in items:
+            yield item
+        total = body.get("totalCount", 0)
+        num_rows = int(body.get("numOfRows", len(items)))
+        if page_no * num_rows >= int(total):
+            break
+        page_no += 1
+        time.sleep(0.1)
+
+
+def select_top_crops(target_date: str, top_n: int = 20, lookback_days: int = 14) -> list[dict]:
+    varieties = load_variety_codes()
+    if not varieties:
+        return []
+
+    by_norm: dict[str, dict] = {}
+    for v in varieties:
+        name = v["vrty_nm"] or v["item_nm"]
+        norm = _normalize_text(name)
+        if norm and norm not in by_norm:
+            by_norm[norm] = v
+
+    volumes: dict[tuple[str, str, str], float] = {}
+    end_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+    for i in range(lookback_days):
+        d = end_date - timedelta(days=i)
+        ymd = _format_yyyymmdd(d)
+        for item in iter_shipment_items(ymd):
+            name = item.get("gds_sclsf_nm") or item.get("gds_mclsf_nm") or item.get("gds_lclsf_nm")
+            norm = _normalize_text(name)
+            v = by_norm.get(norm)
+            if not v:
+                continue
+            qty = _parse_num(item.get("avg_spmt_qty"))
+            if not qty:
+                continue
+            key = (v["ctgry_cd"], v["item_cd"], v["vrty_cd"])
+            volumes[key] = volumes.get(key, 0.0) + qty
+
+    ranked = sorted(volumes.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    selected = []
+    for (ctgry_cd, item_cd, vrty_cd), _ in ranked:
+        v = next((vv for vv in varieties if vv["ctgry_cd"] == ctgry_cd and vv["item_cd"] == item_cd and vv["vrty_cd"] == vrty_cd), None)
+        if not v:
+            continue
+        crop_name = f"{v['item_nm']} {v['vrty_nm']}".strip()
+        selected.append({
+            "crop_name": crop_name,
+            "ctgry_cd": ctgry_cd,
+            "item_cd": item_cd,
+            "vrty_cd": vrty_cd,
+        })
+    return selected
+
 
 def write_to_influx(write_api, records: list[dict]):
-    """
-    records: [
-      { crop_name, market_name, market_code, date_str,
-        price_per_kg, volume_kg }
-    ]
-    """
     points = []
     for r in records:
-        # 가격 포인트
         p_price = (
             Point("kamis_price")
-            .tag("crop_name",   r["crop_name"])
+            .tag("crop_name", r["crop_name"])
             .tag("market_code", r["market_code"])
             .tag("market_name", r["market_name"])
-            .tag("grade",       "상품")
+            .tag("grade", "상품")
+            .tag("se", "중도매")
             .field("price_per_kg", r["price_per_kg"])
-            .time(r["date_str"] + "T00:00:00+09:00", WritePrecision.SECONDS)
+            .time(r["date_str"] + "T00:00:00+09:00", WritePrecision.S)
         )
         points.append(p_price)
 
-        # 반입량 포인트 (volume > 0일 때만)
-        if r["volume_kg"] > 0:
+        if r.get("volume_kg", 0) > 0:
             p_vol = (
                 Point("kamis_volume")
-                .tag("crop_name",   r["crop_name"])
+                .tag("crop_name", r["crop_name"])
                 .tag("market_code", r["market_code"])
                 .tag("market_name", r["market_name"])
                 .field("volume_kg", r["volume_kg"])
-                .time(r["date_str"] + "T00:00:00+09:00", WritePrecision.SECONDS)
+                .time(r["date_str"] + "T00:00:00+09:00", WritePrecision.S)
             )
             points.append(p_vol)
 
     if points:
         write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
-        log.info(f"  → InfluxDB에 {len(points)}개 포인트 적재 완료")
+        log.info(f"  -> InfluxDB wrote {len(points)} points")
 
-
-# ── 메인 수집 루프 ─────────────────────────────────────────────
 
 def collect_for_date(target_date: str, write_api) -> int:
-    """지정 날짜 전체 작목 × 시장 수집. 성공 건수 반환."""
     records = []
-    for crop_name, item_code, cls_code in CROPS:
-        for market_name, market_code in MARKETS:
-            result = fetch_daily_price(item_code, cls_code,
-                                       market_code, target_date)
+    exmn_ymd = _format_yyyymmdd(target_date)
+    date_str = _format_iso_date(exmn_ymd)
+    kat_sale_cache: dict[str, list[dict]] = {}
+    crops = select_top_crops(date_str, top_n=20, lookback_days=14)
+    if not crops:
+        crops = [
+            {"crop_name": c[0], "ctgry_cd": c[1], "item_cd": c[2], "vrty_cd": c[3]}
+            for c in DEFAULT_CROPS
+        ]
+
+    for crop in crops:
+        crop_name = crop["crop_name"]
+        ctgry_cd = crop["ctgry_cd"]
+        item_cd = crop["item_cd"]
+        vrty_cd = crop.get("vrty_cd")
+        for market_name, perday_code, katsale_code in MARKETS:
+            if perday_code:
+                result = fetch_daily_price(ctgry_cd, item_cd, vrty_cd, perday_code, exmn_ymd)
+                if result:
+                    records.append({
+                        "crop_name": crop_name,
+                        "market_name": market_name,
+                        "market_code": perday_code,
+                        "date_str": date_str,
+                        "price_per_kg": result["price_per_kg"],
+                        "volume_kg": 0.0,
+                    })
+                    log.info(
+                        f"  [{crop_name}/{market_name}] {result['price_per_kg']:,.0f} won/kg"
+                    )
+                time.sleep(0.05)
+                continue
+
+            if not katsale_code:
+                continue
+
+            items = kat_sale_cache.get(katsale_code)
+            if items is None:
+                items = fetch_kat_sale_items(date_str, katsale_code)
+                kat_sale_cache[katsale_code] = items
+                time.sleep(0.05)
+            result = extract_kat_sale_price(items, market_name, crop_name)
             if result:
                 records.append({
-                    "crop_name":    crop_name,
-                    "market_name":  market_name,
-                    "market_code":  market_code,
-                    "date_str":     target_date,
-                    **result,
+                    "crop_name": crop_name,
+                    "market_name": market_name,
+                    "market_code": katsale_code,
+                    "date_str": date_str,
+                    "price_per_kg": result["price_per_kg"],
+                    "volume_kg": result.get("volume_kg", 0.0),
                 })
-                log.info(f"  [{crop_name}/{market_name}] "
-                         f"{result['price_per_kg']:,.0f}원/kg  "
-                         f"반입량 {result['volume_kg']:,.0f}kg")
-            time.sleep(0.3)  # API 과호출 방지
+                log.info(
+                    f"  [{crop_name}/{market_name}] {result['price_per_kg']:,.0f} won/kg (katSale)"
+                )
 
     if records:
         write_to_influx(write_api, records)
@@ -177,9 +554,9 @@ def collect_for_date(target_date: str, write_api) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="KAMIS → InfluxDB 수집기")
-    parser.add_argument("--date",     type=str, help="수집 날짜 (YYYY-MM-DD)")
-    parser.add_argument("--backfill", type=int, help="오늘부터 N일 전까지 소급 수집")
+    parser = argparse.ArgumentParser(description="KAMIS -> InfluxDB collector")
+    parser.add_argument("--date", type=str, help="target date (YYYY-MM-DD)")
+    parser.add_argument("--backfill", type=int, help="backfill N days including today")
     args = parser.parse_args()
 
     client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
@@ -187,25 +564,20 @@ def main():
 
     try:
         if args.backfill:
-            # 소급 수집: 오늘부터 N일 전까지
             today = date.today()
-            dates = [str(today - timedelta(days=i))
-                     for i in range(args.backfill, -1, -1)]
-            log.info(f"소급 수집 시작: {dates[0]} ~ {dates[-1]} ({len(dates)}일)")
+            dates = [str(today - timedelta(days=i)) for i in range(args.backfill, -1, -1)]
+            log.info(f"Backfill: {dates[0]} ~ {dates[-1]} ({len(dates)} days)")
             total = 0
             for d in dates:
-                log.info(f"── {d} 수집 중 ──")
+                log.info(f"-- Collect {d} --")
                 total += collect_for_date(d, write_api)
                 time.sleep(1)
-            log.info(f"소급 수집 완료: 총 {total}건")
-
+            log.info(f"Backfill done: {total} records")
         else:
-            # 단일 날짜
             target = args.date or str(date.today())
-            log.info(f"── {target} 수집 중 ──")
+            log.info(f"-- Collect {target} --")
             count = collect_for_date(target, write_api)
-            log.info(f"완료: {count}건")
-
+            log.info(f"Done: {count} records")
     finally:
         client.close()
 

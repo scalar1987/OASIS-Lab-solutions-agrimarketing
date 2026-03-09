@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \":*)",
+      "Bash(python collect_kamis.py --date 2026-03-09)",
+      "Bash(python -c \"import sys; data=sys.stdin.buffer.read\\(\\); print\\(data.decode\\(''utf-8'', errors=''replace''\\)[:800]\\)\")",
+      "Bash(python -c \"print\\(open\\(''kamis_debug3.txt'', encoding=''utf-8''\\).read\\(\\)[:1000]\\)\")",
+      "Bash(python -c \"print\\(open\\(''test_result.txt'', encoding=''utf-8''\\).read\\(\\)\\)\")",
+      "WebSearch",
+      "WebFetch(domain:www.data.go.kr)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:apis.data.go.kr)",
+      "Bash(ls /c/Users/MinhongNa/Downloads/*.zip)",
+      "Read(//c/Users/MinhongNa/**)",
+      "Bash(python -c \"print\\(open\\(''codes.txt'', encoding=''utf-8''\\).read\\(\\)\\)\")",
+      "Bash(python -c \"print\\(open\\(''xlsxfiles.txt'',encoding=''utf-8''\\).read\\(\\)\\)\")",
+      "Bash(ls \"c:\\\\Claude code\\\\OASIS Lab 유통처방 데이터파이프라인 및 엔진\"/collect_*.py \"c:\\\\Claude code\\\\OASIS Lab 유통처방 데이터파이프라인 및 엔진\"/002*.sql)"
+    ]
+  }
+}

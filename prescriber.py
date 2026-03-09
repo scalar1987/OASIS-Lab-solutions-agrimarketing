@@ -14,11 +14,11 @@ from analyzer.momentum import calc_momentum, interpret_momentum
 
 # 작목별 설정
 CROP_CONFIG = {
-    "배추": {"code": "111", "storable": False},
+    "배추": {"code": "211", "storable": False},
     "고추": {"code": "243", "storable": True},
-    "양파": {"code": "221", "storable": True},
-    "마늘": {"code": "231", "storable": True},
-    "대파": {"code": "261", "storable": False},
+    "양파": {"code": "245", "storable": True},
+    "마늘": {"code": "244", "storable": True},
+    "대파": {"code": "246", "storable": False},
     "감자": {"code": "152", "storable": True},
     "사과": {"code": "411", "storable": True},
     "배":   {"code": "412", "storable": True},
@@ -33,7 +33,7 @@ MOMENTUM_DROP   = -8.0   # 이하 → 반입량 감소
 
 
 def generate_prescription(crop_name: str,
-                           market_code: str = "1101",
+                           market_code: str = "0110211",
                            target_date: date | None = None) -> dict:
     """
     단일 작목 처방 생성

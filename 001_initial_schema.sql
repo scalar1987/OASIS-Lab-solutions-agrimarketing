@@ -82,21 +82,68 @@ CREATE TABLE crops (
 
 -- 기본 작목 데이터
 INSERT INTO crops (crop_name, crop_code, category, storable, t_base, harvest_gdd) VALUES
-    ('배추', '111', '채소', FALSE,  5.0,  900),
+    ('배추', '211', '채소', FALSE,  5.0,  900),
     ('고추', '243', '채소', TRUE,  10.0, 2800),
-    ('양파', '221', '채소', TRUE,   7.0, 1800),
-    ('마늘', '231', '채소', TRUE,   5.0, 1200),
-    ('대파', '261', '채소', FALSE,  5.0,  800),
+    ('양파', '245', '채소', TRUE,   7.0, 1800),
+    ('마늘', '244', '채소', TRUE,   5.0, 1200),
+    ('대파', '246', '채소', FALSE,  5.0,  800),
     ('감자', '152', '채소', TRUE,   7.0, 1400),
     ('사과', '411', '과수', TRUE,   5.0, 3200),
     ('배',   '412', '과수', TRUE,   5.0, 2800),
     ('포도', '414', '과수', FALSE, 10.0, 2400);
+
+-- ── 농가 프로필 (개인화 등록) ──────────────────────────────────
+CREATE TABLE farm_profiles (
+    id                  BIGSERIAL PRIMARY KEY,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+
+    -- 계정
+    user_id             UUID         UNIQUE NOT NULL,  -- Supabase auth.users.id
+    owner_name          VARCHAR(100) NOT NULL,
+
+    -- 위치
+    sido                VARCHAR(20)  NOT NULL,          -- 예: 경기
+    sigungu             VARCHAR(30)  NOT NULL,          -- 예: 이천시
+    eupmyeondong        VARCHAR(30),
+    latitude            NUMERIC(9,6),
+    longitude           NUMERIC(9,6),
+
+    -- 알림 설정
+    notification_channel VARCHAR(20) DEFAULT 'push',   -- kakao | sms | push
+    notification_hour    SMALLINT    DEFAULT 7         -- 알림 수신 시간대 (0~23)
+);
+
+CREATE TABLE farm_crops (
+    id                      BIGSERIAL PRIMARY KEY,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+
+    farm_id                 BIGINT      NOT NULL REFERENCES farm_profiles(id) ON DELETE CASCADE,
+    crop_name               VARCHAR(50) NOT NULL,
+    variety                 VARCHAR(50),               -- 품종 (예: 가을배추)
+    cultivation_area_m2     INTEGER,                   -- 재배 면적 (㎡)
+
+    -- 출하처
+    primary_channel         VARCHAR(50),               -- 신지공판장 | 가락도매시장 | 농협APC
+    shipment_channels       TEXT[],                    -- 복수 출하처
+
+    -- 출하 가능 시점
+    planting_date           DATE,
+    expected_harvest_start  DATE        NOT NULL,
+    expected_harvest_end    DATE        NOT NULL,
+    storage_available       BOOLEAN     DEFAULT FALSE,
+    storage_capacity_ton    NUMERIC(8,2)
+);
+
+CREATE INDEX idx_farm_crops_farm_id ON farm_crops (farm_id);
 
 -- ── Row Level Security (Supabase 권장 설정) ───────────────────
 ALTER TABLE prescriptions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE crop_area_stats  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE krei_outlook     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE crops            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE farm_profiles    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE farm_crops       ENABLE ROW LEVEL SECURITY;
 
 -- 프론트엔드(anon key)에서 읽기만 허용
 CREATE POLICY "public read prescriptions"
@@ -107,6 +154,21 @@ CREATE POLICY "public read crops"
 
 CREATE POLICY "public read crop_area_stats"
     ON crop_area_stats FOR SELECT USING (true);
+
+-- 농가 프로필: 본인만 읽기/쓰기
+CREATE POLICY "owner read farm_profiles"
+    ON farm_profiles FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "owner write farm_profiles"
+    ON farm_profiles FOR ALL USING (auth.uid() = user_id);
+
+CREATE POLICY "owner read farm_crops"
+    ON farm_crops FOR SELECT
+    USING (farm_id IN (SELECT id FROM farm_profiles WHERE user_id = auth.uid()));
+
+CREATE POLICY "owner write farm_crops"
+    ON farm_crops FOR ALL
+    USING (farm_id IN (SELECT id FROM farm_profiles WHERE user_id = auth.uid()));
 
 -- service_role(처방 엔진)만 INSERT/UPDATE 가능 — RLS 우회
 -- service_role은 RLS를 자동으로 우회하므로 별도 정책 불필요

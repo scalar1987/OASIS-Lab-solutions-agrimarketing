@@ -1,0 +1,54 @@
+=== API 명세 ===
+서비스명(영문) | perDay |  |  |  |  | 
+서비스명(국문) | 한국농수산식품유통공사_일별 도,소매 가격정보 |  |  |  |  | 
+오퍼레이션명(영문) | price |  |  |  |  | 
+오퍼레이션명(국문) | 일별 도,소매 가격정보 |  |  |  |  | 
+Method | GET |  |  |  |  | 
+서비스 URL | https://apis.data.go.kr/B552845/perDay/price |  |  |  |  | 
+요청 메세지 명세 |  |  |  |  |  | 
+항목명(영문) | 항목명(국문) | 항목크기 | 필수여부 | 항목설명 | 비고 | 
+serviceKey | 인증키 | 100 | 필수 | OpenAPI 키 |  | 
+returnType | 결과 유형 | 10 | 필수 | 결과 유형 (JSON/XML) | default:JSON | 
+pageNo | 페이지 번호 | 4 | 필수 | 페이지 번호 | default: 1 | 
+numOfRows | 페이지 결과 수 | 4 | 필수 | 페이지 결과 수 | default: 10, max:1000 | 
+cond[exmn_ymd::LTE] | 조사일자가 검색값과 일치하거나 작은 데이터를 검색	 |  | 필수 |  | format:YYYYMMDD | 
+cond[exmn_ymd::GTE] | 조사일자가 검색값과 일치하거나 큰 데이터를 검색	 |  | 필수 |  | format:YYYYMMDD | 
+cond[se_cd::EQ] | 검색값과 구분코드가 일치하는 데이터를 검색 |  |  |  |  | 
+cond[ctgry_cd::EQ] | 검색값과 부류코드가 일치하는 데이터를 검색 |  | 필수 |  |  | 
+cond[item_cd::EQ] | 검색값과 품목코드가 일치하는 데이터를 검색 |  | 필수 |  |  | 
+cond[vrty_cd::EQ] | 검색값과 품종코드가 일치하는 데이터를 검색 |  |  |  |  | 
+cond[grd_cd::EQ] | 검색값과 등급코드가 일치하는 데이터를 검색 |  |  |  |  | 
+cond[sgg_cd::EQ] | 검색값과 시군구코드가 일치하는 데이터를 검색 |  |  |  |  | 
+cond[mrkt_cd::EQ] | 검색값과 시장코드가 일치하는 데이터를 검색 |  |  |  |  | 
+selectable | 응답으로 받고 싶은 컬럼명을 선택하여 검색(구분자','로 다중선택) |  |  |  | e.g.) item_cd,vrty_cd | 
+응답 메세지 명세 |  |  |  |  |  | 
+구분 | 항목명(영문) |  |  | 항목명(국문) | 데이터타입 | 비고
+header | resultCode |  |  | 결과코드 | 문자열 | 
+ | resultMsg |  |  | 결과메세지 | 문자열 | 
+body | numOfRows |  |  | 페이지 결과 수 | 숫자 | 
+ | pageNo |  |  | 페이지 번호 | 숫자 | 
+ | totalCount |  |  | 데이터 총 개수 | 숫자 | 
+ | dataType |  |  | 응답타입 | 문자열 | 
+ | items | - | - | - | 배열 | 
+ |  | item | - | - | 객체 | 
+ |  |  | exmn_ymd | 조사일자 | 문자열 | 
+ |  |  | se_cd | 구분코드 | 문자열 | 
+ |  |  | se_nm | 구분명 | 문자열 | 
+ |  |  | ctgry_cd | 부류코드 | 문자열 | 
+ |  |  | ctgry_nm | 부류명 | 문자열 | 
+ |  |  | item_cd | 품목코드 | 문자열 | 
+ |  |  | item_nm | 품목명 | 문자열 | 
+ |  |  | vrty_cd | 품종코드 | 문자열 | 
+ |  |  | vrty_nm | 품종명 | 문자열 | 
+ |  |  | grd_cd | 등급코드 | 문자열 | 
+ |  |  | grd_nm | 등급명 | 문자열 | 
+ |  |  | sgg_cd | 시군구코드 | 문자열 | 
+ |  |  | sgg_nm | 시군구명 | 문자열 | 
+ |  |  | unit | 단위 | 문자열 | 
+ |  |  | unit_sz | 단위크기 | 문자열 | 
+ |  |  | mrkt_cd | 시장코드 | 문자열 | 
+ |  |  | mrkt_nm | 시장명 | 문자열 | 
+ |  |  | exmn_dd_prc | 조사일가격 | 문자열 | 
+ |  |  | exmn_dd_cnvs_prc | 조사일kg환산가격 | 문자열 | 
+ |  |  | orgnl_reg_dt | 원본등록일시 | 문자열 | 
+
