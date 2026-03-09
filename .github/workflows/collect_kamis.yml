@@ -87,18 +87,29 @@ jobs:
           fi
 
       - name: Run collector (auction origin)
-        if: ${{ !inputs.backfill && !inputs.from_date }}
         env:
           KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          for m in 1101 2100 2200 2300 2401 2501 2601; do
-            python collect_auction_origin.py --market $m
-          done
+          if [ -n "${{ inputs.from_date }}" ]; then
+            for m in 1101 2100 2200 2300 2401 2501 2601; do
+              python collect_auction_origin.py --market $m \
+                --from-date ${{ inputs.from_date }} \
+                ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
+            done
+          elif [ -n "${{ inputs.backfill }}" ]; then
+            for m in 1101 2100 2200 2300 2401 2501 2601; do
+              python collect_auction_origin.py --market $m --backfill ${{ inputs.backfill }}
+            done
+          else
+            for m in 1101 2100 2200 2300 2401 2501 2601; do
+              python collect_auction_origin.py --market $m \
+                ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
+            done
+          fi
 
       - name: Run collector (auction settlement)
-        if: ${{ !inputs.backfill && !inputs.from_date }}
         env:
           KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
           INFLUXDB_URL:         ${{ secrets.INFLUXDB_URL }}
@@ -108,12 +119,24 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          for m in 1101 2100 2200 2300 2401 2501 2601; do
-            python collect_auction_settlement.py --market $m
-          done
+          if [ -n "${{ inputs.from_date }}" ]; then
+            for m in 1101 2100 2200 2300 2401 2501 2601; do
+              python collect_auction_settlement.py --market $m \
+                --from-date ${{ inputs.from_date }} \
+                ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
+            done
+          elif [ -n "${{ inputs.backfill }}" ]; then
+            for m in 1101 2100 2200 2300 2401 2501 2601; do
+              python collect_auction_settlement.py --market $m --backfill ${{ inputs.backfill }}
+            done
+          else
+            for m in 1101 2100 2200 2300 2401 2501 2601; do
+              python collect_auction_settlement.py --market $m \
+                ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
+            done
+          fi
 
       - name: Run collector (shipment sequel)
-        if: ${{ !inputs.backfill && !inputs.from_date }}
         env:
           KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
           INFLUXDB_URL:         ${{ secrets.INFLUXDB_URL }}
@@ -123,7 +146,16 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          python collect_shipment_sequel.py
+          if [ -n "${{ inputs.from_date }}" ]; then
+            python collect_shipment_sequel.py \
+              --from-date ${{ inputs.from_date }} \
+              ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
+          elif [ -n "${{ inputs.backfill }}" ]; then
+            python collect_shipment_sequel.py --backfill ${{ inputs.backfill }}
+          else
+            python collect_shipment_sequel.py \
+              ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
+          fi
 
       # ── 가격 등락 정보 (전국 평균 + 등락율) ─────────────────────
       - name: Run collector (rises and falls)

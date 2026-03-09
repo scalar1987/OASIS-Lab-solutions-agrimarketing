@@ -131,9 +131,15 @@ def main():
     parser.add_argument("--date", type=str, help="trade settlement date (YYYY-MM-DD)")
     parser.add_argument("--market", type=str, required=True, help="wholesale market code")
     parser.add_argument("--backfill", type=int, help="backfill N days including today")
+    parser.add_argument("--from-date", type=str, dest="from_date", help="range start (YYYY-MM-DD)")
+    parser.add_argument("--to-date", type=str, dest="to_date", help="range end (YYYY-MM-DD, inclusive)")
     args = parser.parse_args()
 
-    if args.backfill:
+    if args.from_date:
+        start = datetime.strptime(args.from_date, "%Y-%m-%d").date()
+        end   = datetime.strptime(args.to_date, "%Y-%m-%d").date() if args.to_date else date.today()
+        dates = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    elif args.backfill:
         today = date.today()
         dates = [today - timedelta(days=i) for i in range(args.backfill, -1, -1)]
     else:
