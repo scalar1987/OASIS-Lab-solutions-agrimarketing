@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from db.supabase_client import save_auction_origin
 
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://apis.data.go.kr/B552845/katOrigin/trades"
@@ -49,6 +49,8 @@ def iter_origin_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):
     while True:
         data = fetch_origin_trades(trd_clcln_ymd, whsl_mrkt_cd, page_no=page_no)
         body = data.get("response", {}).get("body", {})
+        if page_no == 1:
+            log.debug(f"  API response body keys: {list(body.keys())}, totalCount={body.get('totalCount')}, resultCode={data.get('response',{}).get('header',{}).get('resultCode')}")
         items = body.get("items", {}).get("item", [])
         if isinstance(items, dict):
             items = [items]
