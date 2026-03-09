@@ -414,14 +414,28 @@ def collect_for_date(target_date: str, write_api) -> int:
 def main():
     parser = argparse.ArgumentParser(description="KAMIS -> InfluxDB collector")
     parser.add_argument("--date", type=str, help="target date (YYYY-MM-DD)")
-    parser.add_argument("--backfill", type=int, help="backfill N days including today")
+    parser.add_argument("--backfill", type=int, help="backfill N days ending today")
+    parser.add_argument("--from-date", type=str, dest="from_date", help="range start (YYYY-MM-DD)")
+    parser.add_argument("--to-date", type=str, dest="to_date", help="range end (YYYY-MM-DD, inclusive)")
     args = parser.parse_args()
 
     client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
     write_api = client.write_api(write_options=SYNCHRONOUS)
 
     try:
-        if args.backfill:
+        if args.from_date:
+            start = datetime.strptime(args.from_date, "%Y-%m-%d").date()
+            end   = datetime.strptime(args.to_date, "%Y-%m-%d").date() if args.to_date else date.today()
+            days  = (end - start).days + 1
+            dates = [str(start + timedelta(days=i)) for i in range(days)]
+            log.info(f"Range backfill: {dates[0]} ~ {dates[-1]} ({len(dates)} days)")
+            total = 0
+            for d in dates:
+                log.info(f"-- Collect {d} --")
+                total += collect_for_date(d, write_api)
+                time.sleep(1)
+            log.info(f"Range backfill done: {total} records")
+        elif args.backfill:
             today = date.today()
             dates = [str(today - timedelta(days=i)) for i in range(args.backfill, -1, -1)]
             log.info(f"Backfill: {dates[0]} ~ {dates[-1]} ({len(dates)} days)")
