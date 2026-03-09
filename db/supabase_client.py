@@ -57,6 +57,7 @@ def save_price_history(records: list[dict]) -> int:
             "market_code":  r["market_code"],
             "market_name":  r["market_name"],
             "price_per_kg": round(r["price_per_kg"], 2),
+            "volume_kg":    r["volume_kg"] if r.get("volume_kg", 0) > 0 else None,
             "source":       "kamis",
         }
         for r in records
