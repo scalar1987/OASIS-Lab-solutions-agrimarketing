@@ -73,6 +73,46 @@ def save_price_history(records: list[dict]) -> int:
     return len(resp.data) if resp.data else 0
 
 
+def save_rises_falls(records: list[dict]) -> int:
+    """
+    가격 등락 정보를 price_rises_falls 테이블에 upsert.
+    Returns: upsert된 행 수
+    """
+    if not records:
+        return 0
+    rows = [
+        {
+            "data_date":        r["data_date"],
+            "crop_name":        r["crop_name"],
+            "ctgry_cd":         r.get("ctgry_cd"),
+            "item_cd":          r.get("item_cd"),
+            "vrty_cd":          r.get("vrty_cd"),
+            "vrty_nm":          r.get("vrty_nm"),
+            "grd_cd":           r.get("grd_cd"),
+            "se_cd":            r.get("se_cd"),
+            "unit":             r.get("unit"),
+            "unit_sz":          r.get("unit_sz"),
+            "avg_price":        r.get("avg_price"),
+            "avg_price_per_kg": r.get("avg_price_per_kg"),
+            "dd1_change_rate":  r.get("dd1_change_rate"),
+            "ww1_change_rate":  r.get("ww1_change_rate"),
+            "mm1_change_rate":  r.get("mm1_change_rate"),
+            "yy1_change_rate":  r.get("yy1_change_rate"),
+        }
+        for r in records
+        if r.get("avg_price_per_kg")
+    ]
+    if not rows:
+        return 0
+    resp = (
+        _client()
+        .table("price_rises_falls")
+        .upsert(rows, on_conflict="data_date,crop_name,se_cd,vrty_cd,grd_cd")
+        .execute()
+    )
+    return len(resp.data) if resp.data else 0
+
+
 def query_price_series(crop_name: str, market_code: str, days: int = 730) -> pd.DataFrame:
     """
     price_history에서 가격 시계열 조회.

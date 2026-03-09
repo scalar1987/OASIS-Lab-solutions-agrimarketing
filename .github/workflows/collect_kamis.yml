@@ -42,11 +42,13 @@ jobs:
       - name: Run collector (range backfill)
         if: ${{ inputs.from_date }}
         env:
-          KAMIS_API_KEY:    ${{ secrets.KAMIS_API_KEY }}
-          INFLUXDB_URL:     ${{ secrets.INFLUXDB_URL }}
-          INFLUXDB_TOKEN:   ${{ secrets.INFLUXDB_TOKEN }}
-          INFLUXDB_ORG:     ${{ secrets.INFLUXDB_ORG }}
-          INFLUXDB_BUCKET:  ${{ secrets.INFLUXDB_BUCKET }}
+          KAMIS_API_KEY:       ${{ secrets.KAMIS_API_KEY }}
+          INFLUXDB_URL:        ${{ secrets.INFLUXDB_URL }}
+          INFLUXDB_TOKEN:      ${{ secrets.INFLUXDB_TOKEN }}
+          INFLUXDB_ORG:        ${{ secrets.INFLUXDB_ORG }}
+          INFLUXDB_BUCKET:     ${{ secrets.INFLUXDB_BUCKET }}
+          SUPABASE_URL:        ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           python collect_kamis.py \
             --from-date ${{ inputs.from_date }} \
@@ -56,11 +58,13 @@ jobs:
       - name: Run collector (backfill N days)
         if: ${{ inputs.backfill && !inputs.from_date }}
         env:
-          KAMIS_API_KEY:    ${{ secrets.KAMIS_API_KEY }}
-          INFLUXDB_URL:     ${{ secrets.INFLUXDB_URL }}
-          INFLUXDB_TOKEN:   ${{ secrets.INFLUXDB_TOKEN }}
-          INFLUXDB_ORG:     ${{ secrets.INFLUXDB_ORG }}
-          INFLUXDB_BUCKET:  ${{ secrets.INFLUXDB_BUCKET }}
+          KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
+          INFLUXDB_URL:         ${{ secrets.INFLUXDB_URL }}
+          INFLUXDB_TOKEN:       ${{ secrets.INFLUXDB_TOKEN }}
+          INFLUXDB_ORG:         ${{ secrets.INFLUXDB_ORG }}
+          INFLUXDB_BUCKET:      ${{ secrets.INFLUXDB_BUCKET }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           python collect_kamis.py --backfill ${{ inputs.backfill }}
 
@@ -68,11 +72,13 @@ jobs:
       - name: Run collector (daily)
         if: ${{ !inputs.backfill && !inputs.from_date }}
         env:
-          KAMIS_API_KEY:    ${{ secrets.KAMIS_API_KEY }}
-          INFLUXDB_URL:     ${{ secrets.INFLUXDB_URL }}
-          INFLUXDB_TOKEN:   ${{ secrets.INFLUXDB_TOKEN }}
-          INFLUXDB_ORG:     ${{ secrets.INFLUXDB_ORG }}
-          INFLUXDB_BUCKET:  ${{ secrets.INFLUXDB_BUCKET }}
+          KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
+          INFLUXDB_URL:         ${{ secrets.INFLUXDB_URL }}
+          INFLUXDB_TOKEN:       ${{ secrets.INFLUXDB_TOKEN }}
+          INFLUXDB_ORG:         ${{ secrets.INFLUXDB_ORG }}
+          INFLUXDB_BUCKET:      ${{ secrets.INFLUXDB_BUCKET }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           if [ -n "${{ inputs.date }}" ]; then
             python collect_kamis.py --date ${{ inputs.date }}
@@ -108,3 +114,22 @@ jobs:
           KAMIS_API_KEY:    ${{ secrets.KAMIS_API_KEY }}
         run: |
           python collect_shipment_sequel.py
+
+      # ── 가격 등락 정보 (전국 평균 + 등락율) ─────────────────────
+      - name: Run collector (rises and falls)
+        env:
+          KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -n "${{ inputs.from_date }}" ]; then
+            python collect_rises_falls.py \
+              --from-date ${{ inputs.from_date }} \
+              ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
+          elif [ -n "${{ inputs.backfill }}" ]; then
+            python collect_rises_falls.py --backfill ${{ inputs.backfill }}
+          elif [ -n "${{ inputs.date }}" ]; then
+            python collect_rises_falls.py --date ${{ inputs.date }}
+          else
+            python collect_rises_falls.py
+          fi
