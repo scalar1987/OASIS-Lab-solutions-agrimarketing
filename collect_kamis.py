@@ -18,6 +18,7 @@ import requests
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
+from db.supabase_client import save_price_history
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -38,15 +39,17 @@ GRADE_CODE = "04"  # 04: top grade
 
 # (crop_name, ctgry_cd, item_cd, vrty_cd)
 DEFAULT_CROPS = [
-    ("배추", "200", "211", None),
-    ("고추", "200", "243", None),
     ("양파", "200", "245", None),
+    ("배추", "200", "211", None),
+    ("무", "200", "231", None),
     ("마늘", "200", "244", None),
-    ("대파", "200", "246", None),
     ("감자", "100", "152", None),
+    ("고추", "200", "243", None),
+    ("대파", "200", "246", None),
     ("사과", "400", "411", None),
-    ("배",   "400", "412", None),
-    ("포도", "400", "414", None),
+    ("배", "400", "412", None),
+    ("파프리카", "200", "256", None),
+    ("피망", "200", "255", None),
 ]
 
 # 전국 공영도매시장 32개
@@ -406,7 +409,12 @@ def collect_for_date(target_date: str, write_api) -> int:
                 )
 
     if records:
-        write_to_influx(write_api, records)
+        try:
+            write_to_influx(write_api, records)
+        except Exception as e:
+            log.warning(f"  -> InfluxDB write skipped (retention?): {e}")
+        n = save_price_history(records)
+        log.info(f"  -> Supabase upserted {n} price rows")
 
     return len(records)
 
