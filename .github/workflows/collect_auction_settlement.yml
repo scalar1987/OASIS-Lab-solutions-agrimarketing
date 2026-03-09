@@ -1,22 +1,22 @@
-name: Collect Auction Origin
+name: Collect Auction Settlement
 
 on:
   schedule:
-    # 매일 오전 7시 30분 KST = UTC 22:30
-    - cron: "30 22 * * *"
+    # 매일 오전 6시 30분 KST = UTC 21:30
+    - cron: "30 21 * * *"
   workflow_dispatch:
     inputs:
       date:
-        description: "수집 날짜 (YYYY-MM-DD)"
+        description: "수집 날짜 (YYYY-MM-DD, 비워두면 어제)"
         required: false
       backfill:
-        description: "소급 수집 일수 (예: 90)"
+        description: "소급 수집 일수 (예: 365)"
         required: false
       from_date:
         description: "범위 백필 시작일 (YYYY-MM-DD)"
         required: false
       to_date:
-        description: "범위 백필 종료일 (YYYY-MM-DD)"
+        description: "범위 백필 종료일 (YYYY-MM-DD, 기본: 오늘)"
         required: false
 
 jobs:
@@ -25,38 +25,39 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - name: Run collector (auction origin)
+      - name: Run collector
         env:
           KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
+          INFLUXDB_URL:         ${{ secrets.INFLUXDB_URL }}
+          INFLUXDB_TOKEN:       ${{ secrets.INFLUXDB_TOKEN }}
+          INFLUXDB_ORG:         ${{ secrets.INFLUXDB_ORG }}
+          INFLUXDB_BUCKET:      ${{ secrets.INFLUXDB_BUCKET }}
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           if [ -n "${{ inputs.from_date }}" ]; then
             for m in 1101 2100 2200 2300 2401 2501 2601; do
-              python collect_auction_origin.py --market $m \
+              python collect_auction_settlement.py --market $m \
                 --from-date ${{ inputs.from_date }} \
                 ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
             done
           elif [ -n "${{ inputs.backfill }}" ]; then
             for m in 1101 2100 2200 2300 2401 2501 2601; do
-              python collect_auction_origin.py --market $m --backfill ${{ inputs.backfill }}
+              python collect_auction_settlement.py --market $m --backfill ${{ inputs.backfill }}
             done
           else
             for m in 1101 2100 2200 2300 2401 2501 2601; do
-              python collect_auction_origin.py --market $m \
+              python collect_auction_settlement.py --market $m \
                 ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
             done
           fi
