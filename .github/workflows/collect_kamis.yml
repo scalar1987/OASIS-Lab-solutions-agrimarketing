@@ -100,11 +100,13 @@ jobs:
       - name: Run collector (auction settlement)
         if: ${{ !inputs.backfill && !inputs.from_date }}
         env:
-          KAMIS_API_KEY:    ${{ secrets.KAMIS_API_KEY }}
-          INFLUXDB_URL:     ${{ secrets.INFLUXDB_URL }}
-          INFLUXDB_TOKEN:   ${{ secrets.INFLUXDB_TOKEN }}
-          INFLUXDB_ORG:     ${{ secrets.INFLUXDB_ORG }}
-          INFLUXDB_BUCKET:  ${{ secrets.INFLUXDB_BUCKET }}
+          KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
+          INFLUXDB_URL:         ${{ secrets.INFLUXDB_URL }}
+          INFLUXDB_TOKEN:       ${{ secrets.INFLUXDB_TOKEN }}
+          INFLUXDB_ORG:         ${{ secrets.INFLUXDB_ORG }}
+          INFLUXDB_BUCKET:      ${{ secrets.INFLUXDB_BUCKET }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           for m in 1101 2100 2200 2300 2401 2501 2601; do
             python collect_auction_settlement.py --market $m
@@ -113,7 +115,13 @@ jobs:
       - name: Run collector (shipment sequel)
         if: ${{ !inputs.backfill && !inputs.from_date }}
         env:
-          KAMIS_API_KEY:    ${{ secrets.KAMIS_API_KEY }}
+          KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
+          INFLUXDB_URL:         ${{ secrets.INFLUXDB_URL }}
+          INFLUXDB_TOKEN:       ${{ secrets.INFLUXDB_TOKEN }}
+          INFLUXDB_ORG:         ${{ secrets.INFLUXDB_ORG }}
+          INFLUXDB_BUCKET:      ${{ secrets.INFLUXDB_BUCKET }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           python collect_shipment_sequel.py
 

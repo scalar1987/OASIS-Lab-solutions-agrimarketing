@@ -13,6 +13,7 @@ import requests
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
+from db.supabase_client import save_auction_settlement
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -79,8 +80,11 @@ def write_to_influx(write_api, items: list[dict]):
         points.append(p)
 
     if points:
-        write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
-        log.info(f"  -> InfluxDB wrote {len(points)} points")
+        try:
+            write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
+            log.info(f"  -> InfluxDB wrote {len(points)} points")
+        except Exception as e:
+            log.warning(f"  -> InfluxDB write skipped (retention?): {e}")
 
 
 def fetch_settlement(trd_clcln_ymd: str, whsl_mrkt_cd: str, page_no: int = 1, num_rows: int = 1000) -> dict:
@@ -118,12 +122,8 @@ def iter_settlement_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):
 
 
 def write_to_postgres(items: list[dict]):
-    """
-    TODO: implement PostgreSQL upsert.
-    Suggested unique key: (trd_clcln_ymd, whsl_mrkt_cd, corp_cd, gds_lclsf_cd,
-    gds_mclsf_cd, gds_sclsf_cd, unit_cd, pkg_cd, sz_cd, grd_cd, plor_cd, trd_se)
-    """
-    log.info(f"[dry-run] would write {len(items)} rows to PostgreSQL")
+    n = save_auction_settlement(items)
+    log.info(f"  -> Supabase upserted {n} rows")
 
 
 def main():

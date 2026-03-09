@@ -13,6 +13,7 @@ import requests
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
+from db.supabase_client import save_shipment_sequel
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -81,8 +82,11 @@ def write_to_influx(write_api, items: list[dict], spmt_ymd: str):
         points.append(p)
 
     if points:
-        write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
-        log.info(f"  -> InfluxDB wrote {len(points)} points")
+        try:
+            write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
+            log.info(f"  -> InfluxDB wrote {len(points)} points")
+        except Exception as e:
+            log.warning(f"  -> InfluxDB write skipped (retention?): {e}")
 
 
 def fetch_sequel(spmt_ymd: str, whsl_mrkt_cd: str | None, page_no: int = 1, num_rows: int = 1000) -> dict:
@@ -121,12 +125,13 @@ def iter_sequel_items(spmt_ymd: str, whsl_mrkt_cd: str | None):
         time.sleep(0.2)
 
 
-def write_to_postgres(items: list[dict]):
-    """
-    TODO: implement PostgreSQL upsert.
-    Suggested unique key: (spmt_ymd, whsl_mrkt_cd, corp_cd, gds_lclsf_cd, gds_mclsf_cd, gds_sclsf_cd)
-    """
-    log.info(f"[dry-run] would write {len(items)} rows to PostgreSQL")
+def write_to_postgres(items: list[dict], spmt_ymd: str):
+    # spmt_ymd를 각 record에 주입 (API 응답에 없을 경우 대비)
+    for item in items:
+        if not item.get("spmt_ymd"):
+            item["spmt_ymd"] = _format_iso_date(spmt_ymd)
+    n = save_shipment_sequel(items)
+    log.info(f"  -> Supabase upserted {n} rows")
 
 
 def main():
@@ -156,7 +161,7 @@ def main():
         batch = list(iter_sequel_items(ymd, args.market))
         log.info(f"Fetched {len(batch)} items")
         if batch:
-            write_to_postgres(batch)
+            write_to_postgres(batch, ymd)
             write_to_influx(write_api, batch, ymd)
 
     if client:
