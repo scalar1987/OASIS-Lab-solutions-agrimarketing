@@ -142,8 +142,6 @@ ALTER TABLE prescriptions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE crop_area_stats  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE krei_outlook     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE crops            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE farm_profiles    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE farm_crops       ENABLE ROW LEVEL SECURITY;
 
 -- 프론트엔드(anon key)에서 읽기만 허용
 CREATE POLICY "public read prescriptions"
@@ -154,21 +152,6 @@ CREATE POLICY "public read crops"
 
 CREATE POLICY "public read crop_area_stats"
     ON crop_area_stats FOR SELECT USING (true);
-
--- 농가 프로필: 본인만 읽기/쓰기
-CREATE POLICY "owner read farm_profiles"
-    ON farm_profiles FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "owner write farm_profiles"
-    ON farm_profiles FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "owner read farm_crops"
-    ON farm_crops FOR SELECT
-    USING (farm_id IN (SELECT id FROM farm_profiles WHERE user_id = auth.uid()));
-
-CREATE POLICY "owner write farm_crops"
-    ON farm_crops FOR ALL
-    USING (farm_id IN (SELECT id FROM farm_profiles WHERE user_id = auth.uid()));
 
 -- service_role(처방 엔진)만 INSERT/UPDATE 가능 — RLS 우회
 -- service_role은 RLS를 자동으로 우회하므로 별도 정책 불필요

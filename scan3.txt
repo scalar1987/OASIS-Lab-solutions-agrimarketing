@@ -1,4 +1,0 @@
-test0 cnt=0 keys=['productClsCode', 'itemCode', 'kindCode']
-test1 cnt=0 keys=['productClsCode', 'itemCode', 'countryCode']
-test2 cnt=0 keys=['product_cls_code', 'item_code', 'country_code']
-test3 cnt=0 keys=['startDay', 'endDay', 'itemCode']

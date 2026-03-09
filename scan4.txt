@@ -1,5 +1,0 @@
-test0: cnt=0, key=prce_reg_ymd
-test1: cnt=0, key=prce_reg_ymd
-test2: cnt=0, key=cond[prce_reg_ymd::EQ]
-test3: cnt=0, key=pdlt_code
-test4: cnt=0, key=numOfRows

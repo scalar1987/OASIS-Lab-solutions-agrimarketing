@@ -1,3 +1,0 @@
-Status: 200
-Content-Type: application/json; charset=UTF-8
-{"response":{"body":{"dataType":"JSON","items":{"item":[]},"numOfRows":10,"pageNo":1,"totalCount":0},"header":{"resultCode":"0","resultMsg":"정상"}}}

@@ -1,7 +1,0 @@
-[200] perDay/price: {"response":{"body":{"dataType":"JSON","items":{"item":[]},"numOfRows":10,"pageNo":1,"totalCount":0},"header":{"resultCode":"0","resultMsg":"정상"}}} 
-
-[500] perDay: Unexpected errors 
-
-[404] perDay/priceList: API not found 
-
-[404] perDay/dailyPrice: API not found 

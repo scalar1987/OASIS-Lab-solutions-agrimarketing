@@ -25,7 +25,6 @@ log = logging.getLogger(__name__)
 
 KAMIS_BASE = "https://apis.data.go.kr/B552845/perDay/price"
 KAT_SALE_BASE = "https://apis.data.go.kr/B552845/katSale/trades"
-SHIPMENT_BASE = "https://apis.data.go.kr/B552845/shipmentSequel/info"
 KAMIS_API_KEY = os.environ["KAMIS_API_KEY"]
 
 INFLUX_URL = os.environ["INFLUXDB_URL"]
@@ -320,145 +319,6 @@ def fetch_daily_price(ctgry_cd: str, item_cd: str, vrty_cd: str | None, mrkt_cd:
         return None
 
 
-def _read_codes_text() -> str:
-    for enc in ("utf-8", "cp949", "euc-kr"):
-        try:
-            with open("codes.txt", "r", encoding=enc, errors="strict") as f:
-                return f.read()
-        except Exception:
-            continue
-    with open("codes.txt", "r", encoding="utf-8", errors="ignore") as f:
-        return f.read()
-
-
-def load_variety_codes() -> list[dict]:
-    text = _read_codes_text()
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-
-    item_names: dict[tuple[str, str], str] = {}
-    varieties: list[dict] = []
-
-    mode = None
-    for ln in lines:
-        if ln.startswith("==="):
-            if "품목코드" in ln:
-                mode = "item"
-            elif "품종코드" in ln:
-                mode = "vrty"
-            else:
-                mode = None
-            continue
-        if "|" not in ln or ln.startswith("부류코드") or ln.startswith("부류코드"):
-            continue
-        parts = [p.strip() for p in ln.split("|")]
-        if mode == "item" and len(parts) >= 3:
-            ctgry_cd, item_cd, item_nm = parts[0], parts[1], parts[2]
-            if ctgry_cd.isdigit() and item_cd.isdigit() and item_nm:
-                item_names[(ctgry_cd, item_cd)] = item_nm
-        elif mode == "vrty" and len(parts) >= 4:
-            ctgry_cd, item_cd, vrty_cd, vrty_nm = parts[0], parts[1], parts[2], parts[3]
-            if ctgry_cd.isdigit() and item_cd.isdigit() and vrty_cd.isdigit() and vrty_nm:
-                item_nm = item_names.get((ctgry_cd, item_cd), "")
-                varieties.append({
-                    "ctgry_cd": ctgry_cd,
-                    "item_cd": item_cd,
-                    "vrty_cd": vrty_cd,
-                    "item_nm": item_nm,
-                    "vrty_nm": vrty_nm,
-                })
-    return varieties
-
-
-def fetch_shipment_items(spmt_ymd: str, page_no: int = 1) -> dict | None:
-    params = {
-        "serviceKey": KAMIS_API_KEY,
-        "returnType": "json",
-        "pageNo": str(page_no),
-        "numOfRows": "1000",
-        "cond[spmt_ymd::EQ]": spmt_ymd,
-        "selectable": ",".join([
-            "gds_lclsf_nm",
-            "gds_mclsf_nm",
-            "gds_sclsf_nm",
-            "avg_spmt_qty",
-        ]),
-    }
-    try:
-        resp = requests.get(SHIPMENT_BASE, params=params, timeout=20)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        log.warning(f"shipment fetch failed [{spmt_ymd}]: {e}")
-        return None
-
-
-def iter_shipment_items(spmt_ymd: str):
-    page_no = 1
-    while True:
-        data = fetch_shipment_items(spmt_ymd, page_no=page_no)
-        if not data:
-            break
-        body = data.get("response", {}).get("body", {})
-        items = body.get("items", {}).get("item", [])
-        if isinstance(items, dict):
-            items = [items]
-        if not items:
-            break
-        for item in items:
-            yield item
-        total = body.get("totalCount", 0)
-        num_rows = int(body.get("numOfRows", len(items)))
-        if page_no * num_rows >= int(total):
-            break
-        page_no += 1
-        time.sleep(0.1)
-
-
-def select_top_crops(target_date: str, top_n: int = 20, lookback_days: int = 14) -> list[dict]:
-    varieties = load_variety_codes()
-    if not varieties:
-        return []
-
-    by_norm: dict[str, dict] = {}
-    for v in varieties:
-        name = v["vrty_nm"] or v["item_nm"]
-        norm = _normalize_text(name)
-        if norm and norm not in by_norm:
-            by_norm[norm] = v
-
-    volumes: dict[tuple[str, str, str], float] = {}
-    end_date = datetime.strptime(target_date, "%Y-%m-%d").date()
-    for i in range(lookback_days):
-        d = end_date - timedelta(days=i)
-        ymd = _format_yyyymmdd(d)
-        for item in iter_shipment_items(ymd):
-            name = item.get("gds_sclsf_nm") or item.get("gds_mclsf_nm") or item.get("gds_lclsf_nm")
-            norm = _normalize_text(name)
-            v = by_norm.get(norm)
-            if not v:
-                continue
-            qty = _parse_num(item.get("avg_spmt_qty"))
-            if not qty:
-                continue
-            key = (v["ctgry_cd"], v["item_cd"], v["vrty_cd"])
-            volumes[key] = volumes.get(key, 0.0) + qty
-
-    ranked = sorted(volumes.items(), key=lambda x: x[1], reverse=True)[:top_n]
-    selected = []
-    for (ctgry_cd, item_cd, vrty_cd), _ in ranked:
-        v = next((vv for vv in varieties if vv["ctgry_cd"] == ctgry_cd and vv["item_cd"] == item_cd and vv["vrty_cd"] == vrty_cd), None)
-        if not v:
-            continue
-        crop_name = f"{v['item_nm']} {v['vrty_nm']}".strip()
-        selected.append({
-            "crop_name": crop_name,
-            "ctgry_cd": ctgry_cd,
-            "item_cd": item_cd,
-            "vrty_cd": vrty_cd,
-        })
-    return selected
-
-
 def write_to_influx(write_api, records: list[dict]):
     points = []
     for r in records:
@@ -495,12 +355,10 @@ def collect_for_date(target_date: str, write_api) -> int:
     exmn_ymd = _format_yyyymmdd(target_date)
     date_str = _format_iso_date(exmn_ymd)
     kat_sale_cache: dict[str, list[dict]] = {}
-    crops = select_top_crops(date_str, top_n=20, lookback_days=14)
-    if not crops:
-        crops = [
-            {"crop_name": c[0], "ctgry_cd": c[1], "item_cd": c[2], "vrty_cd": c[3]}
-            for c in DEFAULT_CROPS
-        ]
+    crops = [
+        {"crop_name": c[0], "ctgry_cd": c[1], "item_cd": c[2], "vrty_cd": c[3]}
+        for c in DEFAULT_CROPS
+    ]
 
     for crop in crops:
         crop_name = crop["crop_name"]

@@ -1,0 +1,6 @@
+requests
+python-dotenv
+influxdb-client
+pandas
+numpy
+supabase

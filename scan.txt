@@ -1,4 +1,0 @@
-test0: totalCount=0, params_sample=['serviceKey', 'p_product_cls_code', 'p_item_code']
-test1: totalCount=0, params_sample=['serviceKey', 'p_product_cls_code', 'p_item_code']
-test2: totalCount=0, params_sample=['serviceKey', 'p_regday', 'numOfRows']
-test3: totalCount=0, params_sample=['serviceKey', 'startDay', 'endDay']
