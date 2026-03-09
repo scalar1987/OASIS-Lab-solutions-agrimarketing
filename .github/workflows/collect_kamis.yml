@@ -89,7 +89,9 @@ jobs:
       - name: Run collector (auction origin)
         if: ${{ !inputs.backfill && !inputs.from_date }}
         env:
-          KAMIS_API_KEY:    ${{ secrets.KAMIS_API_KEY }}
+          KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           for m in 1101 2100 2200 2300 2401 2501 2601; do
             python collect_auction_origin.py --market $m

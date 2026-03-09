@@ -1,6 +1,6 @@
 ﻿"""
 collector/collect_auction_origin.py
-KAT Origin (auction origin trades) -> fetch scaffold
+KAT Origin (auction origin trades) -> Supabase
 """
 
 import os
@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 
 import requests
 from dotenv import load_dotenv
+from db.supabase_client import save_auction_origin
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -64,11 +65,8 @@ def iter_origin_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):
 
 
 def write_to_postgres(items: list[dict]):
-    """
-    TODO: implement PostgreSQL upsert.
-    Use a unique key on (trd_clcln_ymd, whsl_mrkt_cd, corp_cd, spm_no, auctn_seq, auctn_seq2).
-    """
-    log.info(f"[dry-run] would write {len(items)} rows to PostgreSQL")
+    n = save_auction_origin(items)
+    log.info(f"  -> Supabase upserted {n} rows")
 
 
 def main():

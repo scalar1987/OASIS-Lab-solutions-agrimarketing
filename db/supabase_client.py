@@ -114,6 +114,70 @@ def save_rises_falls(records: list[dict]) -> int:
     return len(resp.data) if resp.data else 0
 
 
+def save_auction_origin(records: list[dict]) -> int:
+    """
+    경매원천정보를 auction_origin 테이블에 upsert.
+    Returns: upsert된 행 수
+    """
+    if not records:
+        return 0
+
+    def _safe_numeric(val):
+        try:
+            if val is None or str(val).strip() == "":
+                return None
+            return float(str(val).replace(",", ""))
+        except Exception:
+            return None
+
+    rows = [
+        {
+            "trd_clcln_ymd":    r.get("trd_clcln_ymd"),
+            "whsl_mrkt_cd":     r.get("whsl_mrkt_cd"),
+            "whsl_mrkt_nm":     r.get("whsl_mrkt_nm"),
+            "corp_cd":          r.get("corp_cd"),
+            "corp_nm":          r.get("corp_nm"),
+            "spm_no":           r.get("spm_no"),
+            "auctn_seq":        r.get("auctn_seq"),
+            "auctn_seq2":       r.get("auctn_seq2"),
+            "trd_se":           r.get("trd_se"),
+            "gds_lclsf_cd":     r.get("gds_lclsf_cd"),
+            "gds_lclsf_nm":     r.get("gds_lclsf_nm"),
+            "gds_mclsf_cd":     r.get("gds_mclsf_cd"),
+            "gds_mclsf_nm":     r.get("gds_mclsf_nm"),
+            "gds_sclsf_cd":     r.get("gds_sclsf_cd"),
+            "gds_sclsf_nm":     r.get("gds_sclsf_nm"),
+            "corp_gds_item_nm": r.get("corp_gds_item_nm"),
+            "corp_gds_vrty_nm": r.get("corp_gds_vrty_nm"),
+            "unit_qty":         _safe_numeric(r.get("unit_qty")),
+            "unit_nm":          r.get("unit_nm"),
+            "pkg_nm":           r.get("pkg_nm"),
+            "sz_nm":            r.get("sz_nm"),
+            "grd_cd":           r.get("grd_cd"),
+            "grd_nm":           r.get("grd_nm"),
+            "qty":              _safe_numeric(r.get("qty")),
+            "scsbd_prc":        _safe_numeric(r.get("scsbd_prc")),
+            "plor_cd":          r.get("plor_cd"),
+            "plor_nm":          r.get("plor_nm"),
+            "spmt_se":          r.get("spmt_se"),
+            "unit_tot_qty":     _safe_numeric(r.get("unit_tot_qty")),
+            "totprc":           _safe_numeric(r.get("totprc")),
+            "scsbd_dt":         r.get("scsbd_dt"),
+        }
+        for r in records
+        if r.get("trd_clcln_ymd") and r.get("whsl_mrkt_cd")
+    ]
+    if not rows:
+        return 0
+    resp = (
+        _client()
+        .table("auction_origin")
+        .upsert(rows, on_conflict="trd_clcln_ymd,whsl_mrkt_cd,corp_cd,spm_no,auctn_seq,auctn_seq2")
+        .execute()
+    )
+    return len(resp.data) if resp.data else 0
+
+
 def query_price_series(crop_name: str, market_code: str, days: int = 730) -> pd.DataFrame:
     """
     price_history에서 가격 시계열 조회.
