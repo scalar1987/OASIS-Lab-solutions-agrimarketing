@@ -86,29 +86,6 @@ jobs:
             python collect_kamis.py
           fi
 
-      - name: Run collector (auction origin)
-        env:
-          KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
-          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: |
-          if [ -n "${{ inputs.from_date }}" ]; then
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
-              python collect_auction_origin.py --market $m \
-                --from-date ${{ inputs.from_date }} \
-                ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
-            done
-          elif [ -n "${{ inputs.backfill }}" ]; then
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
-              python collect_auction_origin.py --market $m --backfill ${{ inputs.backfill }}
-            done
-          else
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
-              python collect_auction_origin.py --market $m \
-                ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
-            done
-          fi
-
       - name: Run collector (auction settlement)
         env:
           KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
