@@ -33,20 +33,10 @@ def _flux_to_df(flux: str, value_col: str) -> pd.DataFrame:
 
 def query_price_series(crop_name: str, market_code: str, days: int = 730) -> pd.DataFrame:
     """
-    kamis_price에서 가격 시계열 조회
-
-    Returns: DataFrame(index=KST datetime, columns=[price_per_kg])
+    가격 시계열 조회 — Supabase price_history 위임 (InfluxDB 30일 보존 한계 우회)
     """
-    flux = f"""
-from(bucket: "{_BUCKET}")
-  |> range(start: -{days}d)
-  |> filter(fn: (r) => r._measurement == "kamis_price")
-  |> filter(fn: (r) => r.crop_name == "{crop_name}")
-  |> filter(fn: (r) => r.market_code == "{market_code}")
-  |> filter(fn: (r) => r._field == "price_per_kg")
-  |> sort(columns: ["_time"])
-"""
-    return _flux_to_df(flux, "price_per_kg")
+    from db.supabase_client import query_price_series as _pg_query
+    return _pg_query(crop_name, market_code, days)
 
 
 def query_volume_series(crop_name: str, market_code: str, days: int = 60) -> pd.DataFrame:
