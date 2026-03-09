@@ -225,6 +225,15 @@ def save_auction_settlement(records: list[dict]) -> int:
     ]
     if not rows:
         return 0
+    # 배치 내 중복 제거
+    seen = {}
+    for row in rows:
+        key = (row["trd_clcln_ymd"], row["whsl_mrkt_cd"], row.get("corp_cd"),
+               row.get("gds_lclsf_cd"), row.get("gds_mclsf_cd"), row.get("gds_sclsf_cd"),
+               row.get("unit_cd"), row.get("pkg_cd"), row.get("sz_cd"),
+               row.get("grd_cd"), row.get("plor_cd"), row.get("trd_se"))
+        seen[key] = row
+    rows = list(seen.values())
     resp = (
         _client()
         .table("auction_settlement")
@@ -279,6 +288,13 @@ def save_shipment_sequel(records: list[dict]) -> int:
     ]
     if not rows:
         return 0
+    # 배치 내 중복 제거 (ON CONFLICT DO UPDATE 에러 방지)
+    seen = {}
+    for row in rows:
+        key = (row["spmt_ymd"], row["whsl_mrkt_cd"], row.get("corp_cd"),
+               row.get("gds_lclsf_cd"), row.get("gds_mclsf_cd"), row.get("gds_sclsf_cd"))
+        seen[key] = row
+    rows = list(seen.values())
     resp = (
         _client()
         .table("shipment_sequel")
