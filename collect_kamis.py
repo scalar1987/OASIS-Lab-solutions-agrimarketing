@@ -379,14 +379,29 @@ def collect_for_date(target_date: str, write_api) -> int:
     return len(records)
 
 
+BACKFILL_START = date(2025, 3, 9)  # 백필 시작일
+
+
+def _get_max_collected_date() -> date | None:
+    """Supabase price_history에서 가장 최근 수집된 날짜를 조회."""
+    try:
+        from db.supabase_client import _client
+        resp = _client().table("price_history").select("exmn_ymd").order("exmn_ymd", desc=True).limit(1).execute()
+        if resp.data:
+            return datetime.strptime(resp.data[0]["exmn_ymd"], "%Y-%m-%d").date()
+    except Exception as e:
+        log.warning(f"Failed to query max date from Supabase: {e}")
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="KAMIS -> InfluxDB collector")
     parser.add_argument("--date", type=str, help="target date (YYYY-MM-DD)")
     parser.add_argument("--backfill", type=int, help="backfill N days ending today")
     parser.add_argument("--from-date", type=str, dest="from_date", help="range start (YYYY-MM-DD)")
     parser.add_argument("--to-date", type=str, dest="to_date", help="range end (YYYY-MM-DD, inclusive)")
-    parser.add_argument("--chunk-days", type=int, dest="chunk_days", default=None,
-                        help="limit processing to N days from from_date (to avoid daily API quota)")
+    parser.add_argument("--chunk-days", type=int, dest="chunk_days", default=60,
+                        help="limit processing to N days per run (default: 60, ~9,240 API calls)")
     args = parser.parse_args()
 
     client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
@@ -420,10 +435,36 @@ def main():
                 time.sleep(1)
             log.info(f"Backfill done: {total} records")
         else:
-            target = args.date or str(date.today())
-            log.info(f"-- Collect {target} --")
-            count = collect_for_date(target, write_api)
-            log.info(f"Done: {count} records")
+            # 자동 모드: Supabase에서 마지막 수집일 확인 후 다음 chunk 실행
+            yesterday = date.today() - timedelta(days=1)
+            max_date = _get_max_collected_date()
+
+            if max_date is None or max_date < BACKFILL_START:
+                start = BACKFILL_START
+            elif max_date >= yesterday:
+                # 백필 완료 → 오늘/어제 일상 수집
+                target = args.date or str(yesterday)
+                log.info(f"Backfill complete. Daily collect: {target}")
+                count = collect_for_date(target, write_api)
+                log.info(f"Done: {count} records")
+                return
+            else:
+                start = max_date + timedelta(days=1)
+
+            end = yesterday
+            if args.chunk_days:
+                chunk_end = start + timedelta(days=args.chunk_days - 1)
+                end = min(end, chunk_end)
+
+            log.info(f"Auto backfill: {start} ~ {end} (max_collected={max_date})")
+            days = (end - start).days + 1
+            dates = [str(start + timedelta(days=i)) for i in range(days)]
+            total = 0
+            for d in dates:
+                log.info(f"-- Collect {d} --")
+                total += collect_for_date(d, write_api)
+                time.sleep(1)
+            log.info(f"Auto backfill done: {total} records ({dates[0]} ~ {dates[-1]})")
     finally:
         client.close()
 
