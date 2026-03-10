@@ -169,13 +169,17 @@ def save_auction_origin(records: list[dict]) -> int:
     ]
     if not rows:
         return 0
-    resp = (
-        _client()
-        .table("auction_origin")
-        .upsert(rows, on_conflict="trd_clcln_ymd,whsl_mrkt_cd,corp_cd,spm_no,auctn_seq,auctn_seq2")
-        .execute()
-    )
-    return len(resp.data) if resp.data else 0
+    total = 0
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i + 500]
+        resp = (
+            _client()
+            .table("auction_origin")
+            .upsert(chunk, on_conflict="trd_clcln_ymd,whsl_mrkt_cd,corp_cd,spm_no,auctn_seq,auctn_seq2")
+            .execute()
+        )
+        total += len(resp.data) if resp.data else 0
+    return total
 
 
 def save_auction_settlement(records: list[dict]) -> int:
