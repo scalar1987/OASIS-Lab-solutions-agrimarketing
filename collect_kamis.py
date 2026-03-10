@@ -258,26 +258,35 @@ def fetch_daily_prices(ctgry_cd: str, item_cd: str, vrty_cd: str | None, mrkt_cd
     if vrty_cd:
         params["cond[vrty_cd::EQ]"] = vrty_cd
 
-    try:
-        resp = requests.get(KAMIS_BASE, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
+    for attempt in range(5):
+        try:
+            resp = requests.get(KAMIS_BASE, params=params, timeout=10)
+            if resp.status_code == 429:
+                wait = 60 * (attempt + 1)
+                log.warning(f"  429 Too Many Requests [{item_cd}/{mrkt_cd}], waiting {wait}s (attempt {attempt+1}/5)")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
 
-        header = data.get("response", {}).get("header", {})
-        result_code = header.get("resultCode")
-        if result_code not in ("00", "0", None):
-            log.warning(f"KAMIS error {result_code}: {header.get('resultMsg')}")
+            header = data.get("response", {}).get("header", {})
+            result_code = header.get("resultCode")
+            if result_code not in ("00", "0", None):
+                log.warning(f"KAMIS error {result_code}: {header.get('resultMsg')}")
+                return []
+
+            body = data.get("response", {}).get("body", {})
+            items = body.get("items", {}).get("item", [])
+            if isinstance(items, dict):
+                items = [items]
+            return items or []
+
+        except Exception as e:
+            log.warning(f"KAMIS fetch failed [{item_cd}/{mrkt_cd}/{exmn_ymd}]: {e}")
             return []
 
-        body = data.get("response", {}).get("body", {})
-        items = body.get("items", {}).get("item", [])
-        if isinstance(items, dict):
-            items = [items]
-        return items or []
-
-    except Exception as e:
-        log.warning(f"KAMIS fetch failed [{item_cd}/{mrkt_cd}/{exmn_ymd}]: {e}")
-        return []
+    log.warning(f"KAMIS fetch gave up after 5 attempts [{item_cd}/{mrkt_cd}/{exmn_ymd}]")
+    return []
 
 
 def write_to_influx(write_api, records: list[dict]):
