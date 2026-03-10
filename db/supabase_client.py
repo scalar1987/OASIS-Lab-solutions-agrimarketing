@@ -43,35 +43,81 @@ def save_prescription(rx: dict) -> dict:
 
 def save_price_history(records: list[dict]) -> int:
     """
-    가격 데이터를 price_history 테이블에 upsert (배치).
-    records 항목: {date_str, crop_name, market_code, market_name, price_per_kg}
-
+    perDay API 원시 데이터를 price_history 테이블에 upsert (전체 컬럼).
     Returns: upsert된 행 수
     """
     if not records:
         return 0
-    rows = [
-        {
-            "data_date":    r["date_str"],
-            "crop_name":    r["crop_name"],
-            "market_code":  r["market_code"],
-            "market_name":  r["market_name"],
-            "price_per_kg": round(r["price_per_kg"], 2),
-            "volume_kg":    r["volume_kg"] if r.get("volume_kg", 0) > 0 else None,
-            "source":       "kamis",
-        }
-        for r in records
-        if r.get("price_per_kg")
-    ]
+
+    def _to_date(val):
+        if not val:
+            return None
+        s = str(val).strip()
+        if len(s) == 8 and s.isdigit():
+            return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+        return s
+
+    def _n(val):
+        if val is None:
+            return None
+        try:
+            return float(str(val).replace(",", ""))
+        except Exception:
+            return None
+
+    rows = []
+    for r in records:
+        exmn_ymd = _to_date(r.get("exmn_ymd")) or r.get("date_str")
+        item_cd = r.get("item_cd")
+        mrkt_cd = r.get("mrkt_cd")
+        if not exmn_ymd or not item_cd or not mrkt_cd:
+            continue
+        rows.append({
+            "exmn_ymd":         exmn_ymd,
+            "se_cd":            r.get("se_cd"),
+            "se_nm":            r.get("se_nm"),
+            "ctgry_cd":         r.get("ctgry_cd"),
+            "ctgry_nm":         r.get("ctgry_nm"),
+            "item_cd":          item_cd,
+            "item_nm":          r.get("item_nm"),
+            "vrty_cd":          r.get("vrty_cd"),
+            "vrty_nm":          r.get("vrty_nm"),
+            "grd_cd":           r.get("grd_cd"),
+            "grd_nm":           r.get("grd_nm"),
+            "sigungu_cd":       r.get("sigungu_cd"),
+            "sigungu_nm":       r.get("sigungu_nm"),
+            "unit":             r.get("unit"),
+            "unit_sz":          r.get("unit_sz"),
+            "mrkt_cd":          mrkt_cd,
+            "mrkt_nm":          r.get("mrkt_nm"),
+            "exmn_dd_prc":      _n(r.get("exmn_dd_prc")),
+            "exmn_dd_cnvs_prc": _n(r.get("exmn_dd_cnvs_prc")),
+            "orgn_rgstr_dt":    r.get("orgn_rgstr_dt"),
+            "crop_name":        r.get("crop_name"),
+        })
+
     if not rows:
         return 0
-    resp = (
-        _client()
-        .table("price_history")
-        .upsert(rows, on_conflict="data_date,crop_name,market_code")
-        .execute()
-    )
-    return len(resp.data) if resp.data else 0
+
+    # 배치 내 중복 제거
+    seen = {}
+    for row in rows:
+        key = (row["exmn_ymd"], row.get("se_cd"), row["item_cd"],
+               row.get("vrty_cd"), row.get("grd_cd"), row["mrkt_cd"])
+        seen[key] = row
+    rows = list(seen.values())
+
+    total = 0
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i + 500]
+        resp = (
+            _client()
+            .table("price_history")
+            .upsert(chunk, on_conflict="exmn_ymd,se_cd,item_cd,vrty_cd,grd_cd,mrkt_cd")
+            .execute()
+        )
+        total += len(resp.data) if resp.data else 0
+    return total
 
 
 def save_rises_falls(records: list[dict]) -> int:
@@ -308,27 +354,33 @@ def save_shipment_sequel(records: list[dict]) -> int:
     return len(resp.data) if resp.data else 0
 
 
-def query_price_series(crop_name: str, market_code: str, days: int = 730) -> pd.DataFrame:
+def query_price_series(crop_name: str, market_code: str, days: int = 730,
+                       grd_cd: str = "04") -> pd.DataFrame:
     """
     price_history에서 가격 시계열 조회.
+    grd_cd: 등급코드 (기본 "04"=상품). None이면 전체 등급.
 
-    Returns: DataFrame(index=date, columns=[price_per_kg])
+    Returns: DataFrame(index=date, columns=[exmn_dd_cnvs_prc])
     """
     start = str(date.today() - timedelta(days=days))
-    resp = (
+    q = (
         _client()
         .table("price_history")
-        .select("data_date, price_per_kg")
+        .select("exmn_ymd, exmn_dd_cnvs_prc, grd_cd, grd_nm")
         .eq("crop_name", crop_name)
-        .eq("market_code", market_code)
-        .gte("data_date", start)
-        .order("data_date")
-        .execute()
+        .eq("mrkt_cd", market_code)
+        .gte("exmn_ymd", start)
+        .order("exmn_ymd")
     )
+    if grd_cd:
+        q = q.eq("grd_cd", grd_cd)
+    resp = q.execute()
     if not resp.data:
-        return pd.DataFrame(columns=["price_per_kg"])
+        return pd.DataFrame(columns=["exmn_dd_cnvs_prc"])
 
     df = pd.DataFrame(resp.data)
-    df["data_date"] = pd.to_datetime(df["data_date"])
-    df = df.set_index("data_date").sort_index()
+    df["exmn_ymd"] = pd.to_datetime(df["exmn_ymd"])
+    df = df.set_index("exmn_ymd").sort_index()
+    # 하위 호환: price_per_kg 컬럼 별칭
+    df["price_per_kg"] = df["exmn_dd_cnvs_prc"]
     return df

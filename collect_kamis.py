@@ -33,9 +33,7 @@ INFLUX_TOKEN = os.environ["INFLUXDB_TOKEN"]
 INFLUX_ORG = os.environ["INFLUXDB_ORG"]
 INFLUX_BUCKET = os.environ["INFLUXDB_BUCKET"]
 
-# Default filters
 SE_CODE = "02"   # 01: retail, 02: wholesale
-GRADE_CODE = "04"  # 04: top grade
 
 # (crop_name, ctgry_cd, item_cd, vrty_cd)
 DEFAULT_CROPS = [
@@ -243,7 +241,8 @@ def extract_kat_sale_price(items: list[dict], market_name: str, crop_name: str) 
     return {"price_per_kg": price, "volume_kg": volume_kg}
 
 
-def fetch_daily_price(ctgry_cd: str, item_cd: str, vrty_cd: str | None, mrkt_cd: str, exmn_ymd: str) -> dict | None:
+def fetch_daily_prices(ctgry_cd: str, item_cd: str, vrty_cd: str | None, mrkt_cd: str, exmn_ymd: str) -> list[dict]:
+    """perDay API에서 해당 날짜/품목/시장의 전체 등급 항목을 반환."""
     params = {
         "serviceKey": KAMIS_API_KEY,
         "returnType": "json",
@@ -254,7 +253,6 @@ def fetch_daily_price(ctgry_cd: str, item_cd: str, vrty_cd: str | None, mrkt_cd:
         "cond[ctgry_cd::EQ]": ctgry_cd,
         "cond[item_cd::EQ]": item_cd,
         "cond[se_cd::EQ]": SE_CODE,
-        "cond[grd_cd::EQ]": GRADE_CODE,
         "cond[mrkt_cd::EQ]": mrkt_cd,
     }
     if vrty_cd:
@@ -269,66 +267,37 @@ def fetch_daily_price(ctgry_cd: str, item_cd: str, vrty_cd: str | None, mrkt_cd:
         result_code = header.get("resultCode")
         if result_code not in ("00", "0", None):
             log.warning(f"KAMIS error {result_code}: {header.get('resultMsg')}")
-            return None
+            return []
 
         body = data.get("response", {}).get("body", {})
         items = body.get("items", {}).get("item", [])
         if isinstance(items, dict):
             items = [items]
-        if not items:
-            return None
-
-        # pick first item with a valid price
-        picked = None
-        for item in items:
-            price = _parse_price(item.get("exmn_dd_cnvs_prc")) or _parse_price(item.get("exmn_dd_prc"))
-            if price is not None:
-                picked = (item, price)
-                break
-
-        if not picked:
-            return None
-
-        item, price = picked
-        return {
-            "price_per_kg": price,
-            "item_nm": item.get("item_nm"),
-            "mrkt_nm": item.get("mrkt_nm"),
-            "unit": item.get("unit"),
-            "unit_sz": item.get("unit_sz"),
-            "exmn_ymd": item.get("exmn_ymd", exmn_ymd),
-        }
+        return items or []
 
     except Exception as e:
         log.warning(f"KAMIS fetch failed [{item_cd}/{mrkt_cd}/{exmn_ymd}]: {e}")
-        return None
+        return []
 
 
 def write_to_influx(write_api, records: list[dict]):
     points = []
     for r in records:
+        price = r.get("exmn_dd_cnvs_prc") or r.get("price_per_kg")
+        if not price:
+            continue
         p_price = (
             Point("kamis_price")
-            .tag("crop_name", r["crop_name"])
-            .tag("market_code", r["market_code"])
-            .tag("market_name", r["market_name"])
-            .tag("grade", "상품")
-            .tag("se", "중도매")
-            .field("price_per_kg", r["price_per_kg"])
+            .tag("crop_name", r.get("crop_name", ""))
+            .tag("market_code", r.get("mrkt_cd") or r.get("market_code", ""))
+            .tag("market_name", r.get("mrkt_nm") or r.get("market_name", ""))
+            .tag("grade_cd", r.get("grd_cd", ""))
+            .tag("grade_nm", r.get("grd_nm", ""))
+            .tag("vrty_nm", r.get("vrty_nm", ""))
+            .field("price_per_kg", float(price))
             .time(r["date_str"] + "T00:00:00+09:00", WritePrecision.S)
         )
         points.append(p_price)
-
-        if r.get("volume_kg", 0) > 0:
-            p_vol = (
-                Point("kamis_volume")
-                .tag("crop_name", r["crop_name"])
-                .tag("market_code", r["market_code"])
-                .tag("market_name", r["market_name"])
-                .field("volume_kg", r["volume_kg"])
-                .time(r["date_str"] + "T00:00:00+09:00", WritePrecision.S)
-            )
-            points.append(p_vol)
 
     if points:
         write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
@@ -352,39 +321,39 @@ def collect_for_date(target_date: str, write_api) -> int:
         vrty_cd = crop.get("vrty_cd")
         for market_name, perday_code, katsale_code in MARKETS:
             if perday_code:
-                result = fetch_daily_price(ctgry_cd, item_cd, vrty_cd, perday_code, exmn_ymd)
-                if result:
+                items = fetch_daily_prices(ctgry_cd, item_cd, vrty_cd, perday_code, exmn_ymd)
+                for item in items:
+                    price = _parse_price(item.get("exmn_dd_cnvs_prc")) or _parse_price(item.get("exmn_dd_prc"))
+                    if price is None:
+                        continue
                     records.append({
+                        **item,
                         "crop_name": crop_name,
-                        "market_name": market_name,
-                        "market_code": perday_code,
                         "date_str": date_str,
-                        "price_per_kg": result["price_per_kg"],
-                        "volume_kg": 0.0,
+                        "exmn_dd_cnvs_prc": price,
                     })
-                    log.info(
-                        f"  [{crop_name}/{market_name}] {result['price_per_kg']:,.0f} won/kg"
-                    )
+                if items:
+                    grades = [i.get("grd_nm", i.get("grd_cd", "?")) for i in items if _parse_price(i.get("exmn_dd_cnvs_prc"))]
+                    log.info(f"  [{crop_name}/{market_name}] {len(items)} items ({', '.join(grades)})")
                 time.sleep(0.05)
                 continue
 
             if not katsale_code:
                 continue
 
-            items = kat_sale_cache.get(katsale_code)
-            if items is None:
-                items = fetch_kat_sale_items(date_str, katsale_code)
-                kat_sale_cache[katsale_code] = items
+            kat_items = kat_sale_cache.get(katsale_code)
+            if kat_items is None:
+                kat_items = fetch_kat_sale_items(date_str, katsale_code)
+                kat_sale_cache[katsale_code] = kat_items
                 time.sleep(0.05)
-            result = extract_kat_sale_price(items, market_name, crop_name)
+            result = extract_kat_sale_price(kat_items, market_name, crop_name)
             if result:
                 records.append({
                     "crop_name": crop_name,
-                    "market_name": market_name,
-                    "market_code": katsale_code,
+                    "mrkt_nm": market_name,
+                    "mrkt_cd": katsale_code,
                     "date_str": date_str,
-                    "price_per_kg": result["price_per_kg"],
-                    "volume_kg": result.get("volume_kg", 0.0),
+                    "exmn_dd_cnvs_prc": result["price_per_kg"],
                 })
                 log.info(
                     f"  [{crop_name}/{market_name}] {result['price_per_kg']:,.0f} won/kg (katSale)"
