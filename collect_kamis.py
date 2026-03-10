@@ -21,6 +21,11 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 from db.supabase_client import save_price_history
 
 load_dotenv()
+
+
+class QuotaExhaustedError(Exception):
+    """일일 API 쿼터 소진 시 발생. 다음 스케줄 실행 때 재개."""
+    pass
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -285,8 +290,8 @@ def fetch_daily_prices(ctgry_cd: str, item_cd: str, vrty_cd: str | None, mrkt_cd
             log.warning(f"KAMIS fetch failed [{item_cd}/{mrkt_cd}/{exmn_ymd}]: {e}")
             return []
 
-    log.warning(f"KAMIS fetch gave up after 5 attempts [{item_cd}/{mrkt_cd}/{exmn_ymd}]")
-    return []
+    log.warning(f"KAMIS fetch gave up after 5 attempts [{item_cd}/{mrkt_cd}/{exmn_ymd}] — daily quota likely exhausted")
+    raise QuotaExhaustedError(f"429 persisted [{item_cd}/{mrkt_cd}/{exmn_ymd}]")
 
 
 def write_to_influx(write_api, records: list[dict]):
@@ -465,6 +470,9 @@ def main():
                 total += collect_for_date(d, write_api)
                 time.sleep(1)
             log.info(f"Auto backfill done: {total} records ({dates[0]} ~ {dates[-1]})")
+    except QuotaExhaustedError as e:
+        log.warning(f"Stopping early — {e}")
+        log.warning("Will resume from this point on next scheduled run.")
     finally:
         client.close()
 

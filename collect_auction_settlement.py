@@ -89,6 +89,11 @@ def write_to_influx(write_api, items: list[dict]):
             log.warning(f"  -> InfluxDB write skipped (retention?): {e}")
 
 
+class QuotaExhaustedError(Exception):
+    """일일 API 쿼터 소진 시 발생. 다음 스케줄 실행 때 재개."""
+    pass
+
+
 def fetch_settlement(trd_clcln_ymd: str, whsl_mrkt_cd: str, page_no: int = 1, num_rows: int = 1000) -> dict:
     params = {
         "serviceKey": API_KEY,
@@ -107,7 +112,7 @@ def fetch_settlement(trd_clcln_ymd: str, whsl_mrkt_cd: str, page_no: int = 1, nu
             continue
         resp.raise_for_status()
         return resp.json()
-    resp.raise_for_status()  # 5회 실패 시 에러 발생
+    raise QuotaExhaustedError(f"429 persisted after 5 attempts [{whsl_mrkt_cd}/{trd_clcln_ymd}] — daily quota likely exhausted")
 
 
 def iter_settlement_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):
@@ -132,18 +137,21 @@ def iter_settlement_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):
 
 def _get_max_collected_date(market_cd: str) -> date | None:
     """Supabase에서 해당 시장의 최신 수집 날짜 조회."""
-    from db.supabase_client import _client
-    resp = (
-        _client()
-        .table("auction_settlement")
-        .select("trd_clcln_ymd")
-        .eq("whsl_mrkt_cd", market_cd)
-        .order("trd_clcln_ymd", desc=True)
-        .limit(1)
-        .execute()
-    )
-    if resp.data:
-        return datetime.strptime(resp.data[0]["trd_clcln_ymd"], "%Y-%m-%d").date()
+    try:
+        from db.supabase_client import _client
+        resp = (
+            _client()
+            .table("auction_settlement")
+            .select("trd_clcln_ymd")
+            .eq("whsl_mrkt_cd", market_cd)
+            .order("trd_clcln_ymd", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return datetime.strptime(resp.data[0]["trd_clcln_ymd"], "%Y-%m-%d").date()
+    except Exception as e:
+        log.warning(f"Failed to query max date from Supabase for market {market_cd}: {e}")
     return None
 
 
@@ -201,17 +209,21 @@ def main():
     else:
         client = None
 
-    for d in dates:
-        ymd = _format_date_ymd(d)
-        log.info(f"Collecting settlement: {ymd} / market={args.market}")
-        batch = list(iter_settlement_items(ymd, args.market))
-        log.info(f"Fetched {len(batch)} items")
-        if batch:
-            write_to_postgres(batch)
-            write_to_influx(write_api, batch)
-
-    if client:
-        client.close()
+    try:
+        for d in dates:
+            ymd = _format_date_ymd(d)
+            log.info(f"Collecting settlement: {ymd} / market={args.market}")
+            batch = list(iter_settlement_items(ymd, args.market))
+            log.info(f"Fetched {len(batch)} items")
+            if batch:
+                write_to_postgres(batch)
+                write_to_influx(write_api, batch)
+    except QuotaExhaustedError as e:
+        log.warning(f"Stopping early — {e}")
+        log.warning("Will resume from this point on next scheduled run.")
+    finally:
+        if client:
+            client.close()
 
 
 if __name__ == "__main__":
