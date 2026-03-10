@@ -18,6 +18,9 @@ on:
       to_date:
         description: "범위 백필 종료일 (YYYY-MM-DD, 기본: 오늘)"
         required: false
+      chunk_days:
+        description: "1회 실행 최대 처리 일수 (일일 API 쿼터 10,000콜 고려, 60 권장)"
+        required: false
 
 jobs:
   collect:
@@ -48,7 +51,8 @@ jobs:
           if [ -n "${{ inputs.from_date }}" ]; then
             python collect_kamis.py \
               --from-date ${{ inputs.from_date }} \
-              ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
+              ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }} \
+              ${{ inputs.chunk_days && format('--chunk-days {0}', inputs.chunk_days) || '' }}
           elif [ -n "${{ inputs.backfill }}" ]; then
             python collect_kamis.py --backfill ${{ inputs.backfill }}
           elif [ -n "${{ inputs.date }}" ]; then

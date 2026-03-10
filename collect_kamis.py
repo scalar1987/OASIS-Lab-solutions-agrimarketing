@@ -385,6 +385,8 @@ def main():
     parser.add_argument("--backfill", type=int, help="backfill N days ending today")
     parser.add_argument("--from-date", type=str, dest="from_date", help="range start (YYYY-MM-DD)")
     parser.add_argument("--to-date", type=str, dest="to_date", help="range end (YYYY-MM-DD, inclusive)")
+    parser.add_argument("--chunk-days", type=int, dest="chunk_days", default=None,
+                        help="limit processing to N days from from_date (to avoid daily API quota)")
     args = parser.parse_args()
 
     client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
@@ -394,6 +396,10 @@ def main():
         if args.from_date:
             start = datetime.strptime(args.from_date, "%Y-%m-%d").date()
             end   = datetime.strptime(args.to_date, "%Y-%m-%d").date() if args.to_date else date.today()
+            if args.chunk_days:
+                chunk_end = start + timedelta(days=args.chunk_days - 1)
+                end = min(end, chunk_end)
+                log.info(f"chunk-days={args.chunk_days}: processing {start} ~ {end}")
             days  = (end - start).days + 1
             dates = [str(start + timedelta(days=i)) for i in range(days)]
             log.info(f"Range backfill: {dates[0]} ~ {dates[-1]} ({len(dates)} days)")
