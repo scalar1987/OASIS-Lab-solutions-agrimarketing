@@ -44,18 +44,21 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
+          # katOrigin API는 6자리 시장코드 사용
+          # 서울(가락/강서), 부산(엄궁/반여), 대구(북부), 인천(남촌/삼산)
+          MARKETS="110001 110008 210001 210009 220001 230001 230003"
           if [ -n "${{ inputs.from_date }}" ]; then
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
+            for m in $MARKETS; do
               python collect_auction_origin.py --market $m \
                 --from-date ${{ inputs.from_date }} \
                 ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
             done
           elif [ -n "${{ inputs.backfill }}" ]; then
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
+            for m in $MARKETS; do
               python collect_auction_origin.py --market $m --backfill ${{ inputs.backfill }}
             done
           else
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
+            for m in $MARKETS; do
               python collect_auction_origin.py --market $m \
                 ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
             done
