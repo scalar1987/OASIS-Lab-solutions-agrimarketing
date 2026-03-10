@@ -18,6 +18,9 @@ on:
       to_date:
         description: "범위 백필 종료일 (YYYY-MM-DD, 기본: 오늘)"
         required: false
+      chunk_days:
+        description: "1회 실행 최대 처리 일수 (백필 시 50 권장, 기본: 제한 없음)"
+        required: false
 
 jobs:
   collect:
@@ -49,7 +52,8 @@ jobs:
             for m in 1101 2100 2200 2300 2401 2501 2601; do
               python collect_auction_settlement.py --market $m \
                 --from-date ${{ inputs.from_date }} \
-                ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
+                ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }} \
+                ${{ inputs.chunk_days && format('--chunk-days {0}', inputs.chunk_days) || '' }}
             done
           elif [ -n "${{ inputs.backfill }}" ]; then
             for m in 1101 2100 2200 2300 2401 2501 2601; do
