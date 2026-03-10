@@ -9,6 +9,8 @@ import argparse
 import logging
 from datetime import date, datetime, timedelta
 
+BACKFILL_START = date(2025, 3, 9)  # 백필 시작일
+
 import requests
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient, Point, WritePrecision
@@ -128,6 +130,23 @@ def iter_settlement_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):
         time.sleep(0.2)
 
 
+def _get_max_collected_date(market_cd: str) -> date | None:
+    """Supabase에서 해당 시장의 최신 수집 날짜 조회."""
+    from db.supabase_client import _client
+    resp = (
+        _client()
+        .table("auction_settlement")
+        .select("trd_clcln_ymd")
+        .eq("whsl_mrkt_cd", market_cd)
+        .order("trd_clcln_ymd", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if resp.data:
+        return datetime.strptime(resp.data[0]["trd_clcln_ymd"], "%Y-%m-%d").date()
+    return None
+
+
 def write_to_postgres(items: list[dict]):
     n = save_auction_settlement(items)
     log.info(f"  -> Supabase upserted {n} rows")
@@ -144,6 +163,8 @@ def main():
                         help="limit processing to N days from from_date (to avoid daily API quota)")
     args = parser.parse_args()
 
+    yesterday = date.today() - timedelta(days=1)
+
     if args.from_date:
         start = datetime.strptime(args.from_date, "%Y-%m-%d").date()
         end   = datetime.strptime(args.to_date, "%Y-%m-%d").date() if args.to_date else date.today()
@@ -155,9 +176,23 @@ def main():
     elif args.backfill:
         today = date.today()
         dates = [today - timedelta(days=i) for i in range(args.backfill, -1, -1)]
+    elif args.date:
+        dates = [datetime.strptime(args.date, "%Y-%m-%d").date()]
     else:
-        target = args.date or str(date.today() - timedelta(days=1))
-        dates = [datetime.strptime(target, "%Y-%m-%d").date()]
+        # auto-backfill 모드: Supabase 최신 날짜 기준으로 자동 진행
+        max_date = _get_max_collected_date(args.market)
+        if max_date is not None and max_date >= yesterday:
+            log.info(f"market={args.market} already up to date (max={max_date}), collecting yesterday")
+            dates = [yesterday]
+        else:
+            if max_date is None or max_date < BACKFILL_START:
+                start = BACKFILL_START
+            else:
+                start = max_date + timedelta(days=1)
+            chunk = args.chunk_days or 100
+            end = min(yesterday, start + timedelta(days=chunk - 1))
+            log.info(f"auto-backfill market={args.market}: {start} ~ {end} (chunk={chunk})")
+            dates = [start + timedelta(days=i) for i in range((end - start).days + 1)]
 
     write_api = None
     if INFLUX_URL and INFLUX_TOKEN and INFLUX_ORG and INFLUX_BUCKET:

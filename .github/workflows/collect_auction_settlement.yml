@@ -2,8 +2,8 @@ name: Collect Auction Settlement
 
 on:
   schedule:
-    # 매일 오전 6시 30분 KST = UTC 21:30
-    - cron: "30 21 * * *"
+    # 매일 오전 8시 KST = UTC 23:00 (collect_price_history 21:00 이후 실행하여 quota 충돌 방지)
+    - cron: "0 23 * * *"
   workflow_dispatch:
     inputs:
       date:
@@ -59,9 +59,14 @@ jobs:
             for m in 1101 2100 2200 2300 2401 2501 2601; do
               python collect_auction_settlement.py --market $m --backfill ${{ inputs.backfill }}
             done
+          elif [ -n "${{ inputs.date }}" ]; then
+            for m in 1101 2100 2200 2300 2401 2501 2601; do
+              python collect_auction_settlement.py --market $m --date ${{ inputs.date }}
+            done
           else
+            # auto-backfill 모드: 각 시장별로 Supabase 최신 날짜 확인 후 자동 진행
             for m in 1101 2100 2200 2300 2401 2501 2601; do
               python collect_auction_settlement.py --market $m \
-                ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
+                ${{ inputs.chunk_days && format('--chunk-days {0}', inputs.chunk_days) || '' }}
             done
           fi
