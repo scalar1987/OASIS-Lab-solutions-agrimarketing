@@ -1,4 +1,5 @@
--- 경매 정산정보 테이블 (katSale)
+
+- 경매 정산정보 테이블 (katSale)
 CREATE TABLE IF NOT EXISTS auction_settlement (
     id              BIGSERIAL PRIMARY KEY,
     trd_clcln_ymd   DATE        NOT NULL,       -- 거래정산일자

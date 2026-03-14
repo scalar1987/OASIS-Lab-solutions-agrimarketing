@@ -120,6 +120,45 @@ def save_price_history(records: list[dict]) -> int:
     return total
 
 
+def save_kosis_stats(records: list[dict]) -> int:
+    """
+    KOSIS 재배면적/생산량 통계를 crop_area_stats 테이블에 upsert.
+    Returns: upsert된 행 수
+    """
+    if not records:
+        return 0
+
+    rows = [
+        {
+            "year":               r.get("year"),
+            "crop_name":          r.get("crop_name"),
+            "region_cd":          r.get("region_cd", "00"),
+            "region_nm":          r.get("region_nm", "전국"),
+            "cultivation_area_ha": r.get("cultivation_area_ha"),
+            "harvest_area_ha":    r.get("harvest_area_ha"),
+            "production_ton":     r.get("production_ton"),
+            "yield_per_10a":      r.get("yield_per_10a"),
+            "source":             r.get("source", "KOSIS"),
+        }
+        for r in records
+        if r.get("year") and r.get("crop_name")
+    ]
+    if not rows:
+        return 0
+
+    total = 0
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i + 500]
+        resp = (
+            _client()
+            .table("crop_area_stats")
+            .upsert(chunk, on_conflict="year,crop_name,region_cd")
+            .execute()
+        )
+        total += len(resp.data) if resp.data else 0
+    return total
+
+
 def save_rises_falls(records: list[dict]) -> int:
     """
     가격 등락 정보를 price_rises_falls 테이블에 upsert.
@@ -131,12 +170,16 @@ def save_rises_falls(records: list[dict]) -> int:
         {
             "data_date":        r["data_date"],
             "crop_name":        r["crop_name"],
+            "se_cd":            r.get("se_cd"),
+            "se_nm":            r.get("se_nm"),
             "ctgry_cd":         r.get("ctgry_cd"),
+            "ctgry_nm":         r.get("ctgry_nm"),
             "item_cd":          r.get("item_cd"),
+            "item_nm":          r.get("item_nm"),
             "vrty_cd":          r.get("vrty_cd"),
             "vrty_nm":          r.get("vrty_nm"),
             "grd_cd":           r.get("grd_cd"),
-            "se_cd":            r.get("se_cd"),
+            "grd_nm":           r.get("grd_nm"),
             "unit":             r.get("unit"),
             "unit_sz":          r.get("unit_sz"),
             "avg_price":        r.get("avg_price"),
@@ -215,6 +258,13 @@ def save_auction_origin(records: list[dict]) -> int:
     ]
     if not rows:
         return 0
+    # 배치 내 중복 제거 (ON CONFLICT DO UPDATE 에러 방지)
+    seen = {}
+    for row in rows:
+        key = (row["trd_clcln_ymd"], row["whsl_mrkt_cd"], row.get("corp_cd"),
+               row.get("spm_no"), row.get("auctn_seq"), row.get("auctn_seq2"))
+        seen[key] = row
+    rows = list(seen.values())
     total = 0
     for i in range(0, len(rows), 500):
         chunk = rows[i:i + 500]
@@ -349,6 +399,54 @@ def save_shipment_sequel(records: list[dict]) -> int:
         _client()
         .table("shipment_sequel")
         .upsert(rows, on_conflict="spmt_ymd,whsl_mrkt_cd,corp_cd,gds_lclsf_cd,gds_mclsf_cd,gds_sclsf_cd")
+        .execute()
+    )
+    return len(resp.data) if resp.data else 0
+
+
+def save_krei_outlook(records: list[dict]) -> int:
+    """
+    KREI 농업관측월보 파싱 결과를 krei_outlook 테이블에 upsert.
+    Returns: upsert된 행 수
+    """
+    if not records:
+        return 0
+
+    def _n(val):
+        try:
+            if val is None:
+                return None
+            return float(val)
+        except (ValueError, TypeError):
+            return None
+
+    rows = [
+        {
+            "year_month":              r.get("year_month"),
+            "report_category":         r.get("report_category", ""),
+            "crop_name":               r.get("crop_name"),
+            "price_unit":              r.get("price_unit"),
+            "prev_month_price":        _n(r.get("prev_month_price")),
+            "prev_month_vs_prev_year": r.get("prev_month_vs_prev_year"),
+            "shipment_chg_pct":        _n(r.get("shipment_chg_pct")),
+            "shipment_direction":      r.get("shipment_direction"),
+            "cultivation_area_ha":     _n(r.get("cultivation_area_ha")),
+            "yield_per_10a":           _n(r.get("yield_per_10a")),
+            "production_ton":          _n(r.get("production_ton")),
+            "forecast_price":          _n(r.get("forecast_price")),
+            "forecast_vs_prev_year":   r.get("forecast_vs_prev_year"),
+            "source_url":              r.get("source_url"),
+        }
+        for r in records
+        if r.get("year_month") and r.get("crop_name")
+    ]
+    if not rows:
+        return 0
+
+    resp = (
+        _client()
+        .table("krei_outlook")
+        .upsert(rows, on_conflict="year_month,crop_name")
         .execute()
     )
     return len(resp.data) if resp.data else 0

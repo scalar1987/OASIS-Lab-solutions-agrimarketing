@@ -26,8 +26,7 @@ log = logging.getLogger(__name__)
 RISES_FALLS_BASE = "https://apis.data.go.kr/B552845/risesAndFalls/info"
 KAMIS_API_KEY = os.environ["KAMIS_API_KEY"]
 
-SE_CODE    = "02"   # 02: 중도매
-GRADE_CODE = "04"   # 04: 상품
+SE_CODE = "02"   # 02: 중도매 (소매·친환경은 별도 API)
 
 # (crop_name, ctgry_cd, item_cd, vrty_cd)  vrty_cd=None → 전체 품종
 CROPS = [
@@ -64,7 +63,6 @@ def fetch_rises_falls(exmn_ymd: str, ctgry_cd: str, item_cd: str, vrty_cd: str |
         "cond[se_cd::EQ]":     SE_CODE,
         "cond[ctgry_cd::EQ]":  ctgry_cd,
         "cond[item_cd::EQ]":   item_cd,
-        "cond[grd_cd::EQ]":    GRADE_CODE,
     }
     if vrty_cd:
         params["cond[vrty_cd::EQ]"] = vrty_cd
@@ -101,12 +99,16 @@ def collect_for_date(target_date: str) -> int:
             records.append({
                 "data_date":        target_date,
                 "crop_name":        crop_name,
+                "se_cd":            item.get("se_cd"),
+                "se_nm":            item.get("se_nm"),
                 "ctgry_cd":         item.get("ctgry_cd"),
+                "ctgry_nm":         item.get("ctgry_nm"),
                 "item_cd":          item.get("item_cd"),
+                "item_nm":          item.get("item_nm"),
                 "vrty_cd":          item.get("vrty_cd"),
                 "vrty_nm":          item.get("vrty_nm"),
                 "grd_cd":           item.get("grd_cd"),
-                "se_cd":            item.get("se_cd"),
+                "grd_nm":           item.get("grd_nm"),
                 "unit":             item.get("unit"),
                 "unit_sz":          item.get("unit_sz"),
                 "avg_price":        _safe_float(item.get("exmn_dd_avg_prc")),
