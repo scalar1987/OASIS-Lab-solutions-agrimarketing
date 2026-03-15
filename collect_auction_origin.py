@@ -46,6 +46,11 @@ def fetch_origin_trades(trd_clcln_ymd: str, whsl_mrkt_cd: str, page_no: int = 1,
             log.warning(f"  429 Too Many Requests, waiting {wait}s (attempt {attempt+1}/5)")
             time.sleep(wait)
             continue
+        if resp.status_code in (500, 502, 503, 504) and attempt < 4:
+            wait = 10 * (2 ** attempt)  # 10, 20, 40, 80s
+            log.warning(f"  {resp.status_code} Server Error, retrying in {wait}s (attempt {attempt+1}/5)")
+            time.sleep(wait)
+            continue
         resp.raise_for_status()
         return resp.json()
     resp.raise_for_status()
