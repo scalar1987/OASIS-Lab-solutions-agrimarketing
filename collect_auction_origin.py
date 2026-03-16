@@ -15,6 +15,8 @@ from db.supabase_client import save_auction_origin
 
 load_dotenv()
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://apis.data.go.kr/B552845/katOrigin/trades"
