@@ -48,24 +48,26 @@ jobs:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
+          # katSale API는 6자리 시장코드 사용 (공영도매시장 30개소)
+          MARKETS="110001 110008 210001 210009 220001 230001 230003 240001 240004 250001 250003 310101 310401 310901 311201 320101 320201 330101 330201 350101 350301 350402 360301 370101 370401 371501 380101 380201 380303 380401"
           if [ -n "${{ inputs.from_date }}" ]; then
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
+            for m in $MARKETS; do
               python collect_auction_settlement.py --market $m \
                 --from-date ${{ inputs.from_date }} \
                 ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }} \
                 ${{ inputs.chunk_days && format('--chunk-days {0}', inputs.chunk_days) || '' }}
             done
           elif [ -n "${{ inputs.backfill }}" ]; then
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
+            for m in $MARKETS; do
               python collect_auction_settlement.py --market $m --backfill ${{ inputs.backfill }}
             done
           elif [ -n "${{ inputs.date }}" ]; then
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
+            for m in $MARKETS; do
               python collect_auction_settlement.py --market $m --date ${{ inputs.date }}
             done
           else
             # auto-backfill 모드: 각 시장별로 Supabase 최신 날짜 확인 후 자동 진행
-            for m in 1101 2100 2200 2300 2401 2501 2601; do
+            for m in $MARKETS; do
               python collect_auction_settlement.py --market $m \
                 ${{ inputs.chunk_days && format('--chunk-days {0}', inputs.chunk_days) || '' }}
             done
