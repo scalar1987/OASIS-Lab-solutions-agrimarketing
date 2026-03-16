@@ -110,6 +110,11 @@ def fetch_settlement(trd_clcln_ymd: str, whsl_mrkt_cd: str, page_no: int = 1, nu
             log.warning(f"  429 Too Many Requests, waiting {wait}s (attempt {attempt+1}/5)")
             time.sleep(wait)
             continue
+        if resp.status_code in (500, 502, 503, 504) and attempt < 4:
+            wait = 10 * (2 ** attempt)
+            log.warning(f"  {resp.status_code} Server Error, retrying in {wait}s (attempt {attempt+1}/5)")
+            time.sleep(wait)
+            continue
         resp.raise_for_status()
         return resp.json()
     raise QuotaExhaustedError(f"429 persisted after 5 attempts [{whsl_mrkt_cd}/{trd_clcln_ymd}] — daily quota likely exhausted")
@@ -120,7 +125,14 @@ def iter_settlement_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):
     while True:
         data = fetch_settlement(trd_clcln_ymd, whsl_mrkt_cd, page_no=page_no)
         body = data.get("response", {}).get("body", {})
-        items = body.get("items", {}).get("item", [])
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(f"  API response body keys: {list(body.keys()) if isinstance(body, dict) else type(body)}, totalCount={body.get('totalCount') if isinstance(body, dict) else '?'}, resultCode={data.get('response',{}).get('header',{}).get('resultCode')}")
+        raw_items = body.get("items", {}) if isinstance(body, dict) else {}
+        # Korean public APIs sometimes return "" or null when there are no items
+        if not raw_items or not isinstance(raw_items, dict):
+            log.info(f"  No items for {trd_clcln_ymd} market={whsl_mrkt_cd} (items={repr(raw_items)[:80]})")
+            break
+        items = raw_items.get("item", [])
         if isinstance(items, dict):
             items = [items]
         if not items:
