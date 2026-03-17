@@ -81,8 +81,18 @@ def iter_origin_items(trd_clcln_ymd: str, whsl_mrkt_cd: str):
 
 
 def write_to_postgres(items: list[dict]):
-    n = save_auction_origin(items)
-    log.info(f"  -> Supabase upserted {n} rows")
+    for attempt in range(5):
+        try:
+            n = save_auction_origin(items)
+            log.info(f"  -> Supabase upserted {n} rows")
+            return
+        except Exception as e:
+            if attempt < 4:
+                wait = 15 * (2 ** attempt)  # 15, 30, 60, 120s
+                log.warning(f"  Supabase upsert failed ({e}), retrying in {wait}s (attempt {attempt+1}/5)")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def main():
