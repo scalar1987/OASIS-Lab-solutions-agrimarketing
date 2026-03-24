@@ -1,9 +1,8 @@
-name: Collect Price History
+name: Collect Shipment Sequel
 
 on:
-  schedule:
-    # 매일 오전 6시 KST = UTC 21:00
-    - cron: "0 21 * * *"
+  # schedule 비활성화: Supabase 용량 초과로 임시 중단
+  # - cron: "0 22 * * *"
   workflow_dispatch:
     inputs:
       date:
@@ -17,9 +16,6 @@ on:
         required: false
       to_date:
         description: "범위 백필 종료일 (YYYY-MM-DD, 기본: 오늘)"
-        required: false
-      chunk_days:
-        description: "1회 실행 최대 처리 일수 (일일 API 쿼터 10,000콜 고려, 60 권장)"
         required: false
 
 jobs:
@@ -49,14 +45,13 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           if [ -n "${{ inputs.from_date }}" ]; then
-            python collect_kamis.py \
+            python collect_shipment_sequel.py \
               --from-date ${{ inputs.from_date }} \
-              ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }} \
-              ${{ inputs.chunk_days && format('--chunk-days {0}', inputs.chunk_days) || '' }}
+              ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
           elif [ -n "${{ inputs.backfill }}" ]; then
-            python collect_kamis.py --backfill ${{ inputs.backfill }}
+            python collect_shipment_sequel.py --backfill ${{ inputs.backfill }}
           elif [ -n "${{ inputs.date }}" ]; then
-            python collect_kamis.py --date ${{ inputs.date }}
+            python collect_shipment_sequel.py --date ${{ inputs.date }}
           else
-            python collect_kamis.py
+            python collect_shipment_sequel.py
           fi

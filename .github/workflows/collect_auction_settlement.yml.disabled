@@ -1,9 +1,8 @@
 name: Collect Auction Settlement
 
 on:
-  schedule:
-    # 매일 오전 8시 KST = UTC 23:00 (collect_price_history 21:00 이후 실행하여 quota 충돌 방지)
-    - cron: "0 23 * * *"
+  # schedule 비활성화: Supabase 용량 초과로 임시 중단
+  # - cron: "0 23 * * *"
   workflow_dispatch:
     inputs:
       date:

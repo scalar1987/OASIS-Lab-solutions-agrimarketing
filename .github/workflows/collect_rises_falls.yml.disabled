@@ -1,13 +1,12 @@
-name: Collect Shipment Sequel
+name: Collect Rises and Falls
 
 on:
-  schedule:
-    # 매일 오전 7시 KST = UTC 22:00
-    - cron: "0 22 * * *"
+  # schedule 비활성화: Supabase 용량 초과로 임시 중단
+  # - cron: "10 21 * * *"
   workflow_dispatch:
     inputs:
       date:
-        description: "수집 날짜 (YYYY-MM-DD, 비워두면 어제)"
+        description: "수집 날짜 (YYYY-MM-DD, 비워두면 오늘)"
         required: false
       backfill:
         description: "소급 수집 일수 (예: 365)"
@@ -38,21 +37,17 @@ jobs:
       - name: Run collector
         env:
           KAMIS_API_KEY:        ${{ secrets.KAMIS_API_KEY }}
-          INFLUXDB_URL:         ${{ secrets.INFLUXDB_URL }}
-          INFLUXDB_TOKEN:       ${{ secrets.INFLUXDB_TOKEN }}
-          INFLUXDB_ORG:         ${{ secrets.INFLUXDB_ORG }}
-          INFLUXDB_BUCKET:      ${{ secrets.INFLUXDB_BUCKET }}
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           if [ -n "${{ inputs.from_date }}" ]; then
-            python collect_shipment_sequel.py \
+            python collect_rises_falls.py \
               --from-date ${{ inputs.from_date }} \
               ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }}
           elif [ -n "${{ inputs.backfill }}" ]; then
-            python collect_shipment_sequel.py --backfill ${{ inputs.backfill }}
+            python collect_rises_falls.py --backfill ${{ inputs.backfill }}
           elif [ -n "${{ inputs.date }}" ]; then
-            python collect_shipment_sequel.py --date ${{ inputs.date }}
+            python collect_rises_falls.py --date ${{ inputs.date }}
           else
-            python collect_shipment_sequel.py
+            python collect_rises_falls.py
           fi
