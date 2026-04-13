@@ -1,0 +1,29 @@
+# Dev notes with API keys
+app_vision_todo.md
+
+# MCP config (may contain API keys)
+.mcp.json
+
+# Large image dataset
+ai hub_images/
+
+# Generated manifest files (too large)
+manifest.csv
+manifest.json
+dataset_statistics.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+# Model weights (too large for git)
+*.pt
+*.pth
+*.onnx
+*.tflite
+
+# OS
+.DS_Store
+Thumbs.db
